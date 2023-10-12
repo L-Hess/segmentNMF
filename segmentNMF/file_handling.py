@@ -185,7 +185,7 @@ def neighborhood_by_distance(S, segments_shape, spacing, max_dist, subsample=Non
         if subsample is not None:
             Bi = Bi[::subsample[0], ::subsample[1], ::subsample[2]]
         B_res[:, c_i] = Bi.reshape(B_res[:, c_i].shape)
-    return B
+    return B_res
 
 
 def create_zarr(path, shape, chunks, dtype, chunk_locked=False, client=None):
