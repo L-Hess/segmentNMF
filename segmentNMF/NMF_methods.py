@@ -269,10 +269,10 @@ def nmf_pytorch(V, S_init, H_init, B, H_true=None, num_iterations=100, update_in
     """Compute NMF using gradient descent
 
     Args:
-        V: A PyTorch tensor representing the input data matrix.
-        S_init: A PyTorch tensor representing the initial spatial components matrix.
-        H_init: A PyTorch tensor representing the initial temporal components matrix.
-        B: A PyTorch tensor representing the neighborhood matrix.
+        V: A NumPy array or PyTorch tensor representing the input data matrix.
+        S_init: A NumPy array or PyTorch tensor representing the initial spatial components matrix.
+        H_init: A NumPy array or PyTorch tensor representing the initial temporal components matrix.
+        B: A NumPy array or PyTorch tensor representing the neighborhood matrix.
         H_true: A PyTorch tensor representing the true temporal components matrix (optional).
         num_iterations: The number of iterations to run the algorithm for (default: 100).
         update_int: The interval at which to display progress updates (default: 10).
