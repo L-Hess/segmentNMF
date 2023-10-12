@@ -317,7 +317,7 @@ def nmf_pytorch(V, S_init, H_init, B, H_true=None, num_iterations=100, update_in
 
         # Update H matrix with dynamically estimated step size
         H_gradient = S.T @ (V - S @ H)
-        H_step_size = (H_lr / torch.diag(S.T @ S))[:, None]
+        H_step_size = H_lr / torch.sum(S * S, axis=0)[:, None]
         # H_lr = line_search_step_size(V, S, H, H_gradient, gradient_str='H',
         #                                     objective_function=frobenius_norm_pytorch,
         #                                     lr=H_step_size, alpha=1, beta=0.9)
@@ -328,7 +328,7 @@ def nmf_pytorch(V, S_init, H_init, B, H_true=None, num_iterations=100, update_in
         # Update S matrix with spatial constraint
         # All values outside of neighborhood B are set to 1e-12 for stability
         S_gradient = (V - S @ H) @ H.T
-        S_step_size = S_lr #/ torch.diag(H[:n_components] @ H[:n_components].T)[None, :]
+        S_step_size = S_lr #/ torch.sum(H[:n_components] * H[:n_components], axis=1)[None, :]
         # S_lr = line_search_step_size(V, S, H, S_gradient, gradient_str='S',
         #                              objective_function=frobenius_norm_pytorch,
         #                              lr=S_step_size, alpha=1.01, beta=0.1)
