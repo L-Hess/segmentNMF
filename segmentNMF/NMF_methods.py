@@ -223,9 +223,9 @@ def nmf(V, S_init, H_init, B, H_true=None, num_iterations=100, update_int=10, H_
             progress_str = 'Iteration {} | Objective: {:.6f} | avg H step {:.10f} | avg S step {:.10f}'.format(
                 i, objectives[i], np.mean(H_gradients[i]), np.mean(S_gradients[i]))
             if H_true is not None:
-                correlation = pearsonr_mat(H.roll(-1, axis=0)[:H_true.shape[0]], H_true, axis=0)
-                progress_str += ' | avg corr {:.5f} | min corr {:.5f}'.format(np.mean(correlations[i]),
-                                                                              np.min(correlations[i]))
+                correlations.append(pearsonr_mat(H.roll(-1, axis=0)[:H_true.shape[0]], H_true, axis=0))
+                progress_str += ' | avg corr {:.5f} | min corr {:.5f}'.format(np.mean(correlations[-1]),
+                                                                              np.min(correlations[-1]))
             tqdm.tqdm.write(progress_str)
 
         # Check stopping criterion
@@ -237,7 +237,10 @@ def nmf(V, S_init, H_init, B, H_true=None, num_iterations=100, update_int=10, H_
                 print('Objective increased: [i-1]: {}, [i]: {}'.format(objectives[i-1], objectives[i]))
                 break
 
-    return S, H, objectives
+    if H_true is not None:
+        return S, H, objectives, correlations
+    else:
+        return S, H, objectives
 
 # ======================================================================================================================
 # Pytorch-based implementation
