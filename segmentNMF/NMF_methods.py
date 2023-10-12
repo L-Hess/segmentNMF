@@ -264,7 +264,7 @@ def frobenius_norm_pytorch(V, S, H):
 
 
 def nmf_pytorch(V, S_init, H_init, B, H_true=None, num_iterations=100, update_int=10, H_lr: float = 1.,
-                S_lr: float = 1, objective_threshold: float = 1e-2, min_iterations: int = 50):
+                S_lr: float = 1e-6, objective_threshold: float = 1e-2, min_iterations: int = 50):
 
     """Compute NMF using gradient descent
 
@@ -278,8 +278,7 @@ def nmf_pytorch(V, S_init, H_init, B, H_true=None, num_iterations=100, update_in
         update_int: The interval at which to display progress updates (default: 10).
         H_lr: The learning rate for the H matrix (default: 1).
         S_lr: The learning rate for the S matrix (default: 1e-6).
-        objective_threshold: The stopping criterion for the objective (default: 1e-6).
-        estimate_noise_component: Whether to estimate a noise component (default: True).
+        objective_threshold: The stopping criterion for the objective (default: 1e-2).
         min_iterations: The minimum number of iterations to run the algorithm for (default: 50).
 
     Returns:
