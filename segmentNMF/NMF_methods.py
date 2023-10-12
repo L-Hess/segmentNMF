@@ -219,7 +219,7 @@ def nmf(V, S_init, H_init, B, H_true=None, num_iterations=100, update_int=10, H_
             progress_str = 'Iteration {} | Objective: {:.6f} | avg H step {:.10f} | avg S step {:.10f}'.format(
                 i, objectives[i], np.mean(H_gradients[i]), np.mean(S_gradients[i]))
             if H_true is not None:
-                correlation = pearsonr_mat(H.roll(-1, axis=0)[:H_true.shape[0]].cpu().numpy(), H_true, axis=0)
+                correlation = pearsonr_mat(H.roll(-1, axis=0)[:H_true.shape[0]], H_true, axis=0)
                 progress_str += ' | avg corr {:.5f} | min corr {:.5f}'.format(np.mean(correlations[i]),
                                                                               np.min(correlations[i]))
             tqdm.tqdm.write(progress_str)
