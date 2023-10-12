@@ -85,7 +85,7 @@ def line_search_step_size(V, S, H, gradient, objective_function, gradient_str='S
         H: A PyTorch tensor representing the temporal components matrix.
         gradient: A PyTorch tensor representing the gradient of the objective function with respect to the parameter.
         objective_function: A function that takes the input data matrix, the spatial components matrix, and the temporal components matrix and returns the objective value.
-        is_gradient_for_s: A boolean indicating whether the gradient belongs to S or to H.
+        gradient_str: A string indicating whether gradient is for S or H. Only valid values are 'S' and 'H'
         lr: The initial learning rate.
         alpha: The strong Wolfe line search parameter.
         beta: The backtracking factor.
@@ -122,7 +122,7 @@ def line_search_step_size(V, S, H, gradient, objective_function, gradient_str='S
         # Otherwise, reduce the step size and try again
         else:
             step_size *= beta
-            print(gradient_str + ': final step size {}'.format(step_size))
+            print(gradient_str + ': new line search step size {}'.format(step_size))
 
     print(gradient_str + ': final step size {}'.format(step_size))
     return step_size
