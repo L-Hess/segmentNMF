@@ -359,11 +359,13 @@ def nmf_pytorch(V, S_init, H_init, B, H_true=None, num_iterations=100, update_in
             print(progress_str)
 
         # Check stopping criterion
-        if objective_threshold is not None \
-                and i > min_iterations \
-                and abs(objectives[i] - objectives[i - 1]) < objective_threshold or objectives[i] > objectives[i - 1]:
-            print('Reached stopping criterion (d objective < {})'.format(objective_threshold))
-            break
+        if objective_threshold is not None and i > min_iterations:
+            if abs(objectives[i] - objectives[i - 1]) < objective_threshold:
+                print('Reached stopping criterion (d objective < {})'.format(objective_threshold))
+                break
+            if objectives[i] > objectives[i - 1]:
+                print('Objective increased: [i-1]: {}, [i]: {}'.format(objectives[i-1], objectives[i]))
+                break
 
     # Move tensors back to the CPU
     S = S.cpu().numpy()
