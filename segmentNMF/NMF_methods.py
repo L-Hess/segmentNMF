@@ -319,7 +319,8 @@ def nmf_pytorch(V, S_init, H_init, B, H_true=None, num_iterations=100, update_in
         # H_lr = line_search_step_size(V, S, H, H_gradient, gradient_str='H',
         #                                     objective_function=frobenius_norm_pytorch,
         #                                     lr=H_step_size, alpha=1, beta=0.9)
-        H.add_(H_step_size * H_gradient)
+        H_gradient *= H_step_size
+        H.add_(H_gradient)
         H[torch.isnan(H)] = 1e-12
         H = torch.relu(H)
 
@@ -330,13 +331,14 @@ def nmf_pytorch(V, S_init, H_init, B, H_true=None, num_iterations=100, update_in
         # S_lr = line_search_step_size(V, S, H, S_gradient, gradient_str='S',
         #                              objective_function=frobenius_norm_pytorch,
         #                              lr=S_step_size, alpha=1.01, beta=0.1)
-        S.add_(S_step_size * S_gradient)
+        S_gradient *= S_step_size
+        S.add_(S_gradient)
         S[torch.logical_not(B)] = 1e-12
         S = torch.relu(S)
 
         # Save gradient steps
-        S_gradients.append(torch.mean(S_step_size * S_gradient).item())
-        H_gradients.append(torch.mean(H_step_size * H_gradient).item())
+        S_gradients.append(torch.mean(S_gradient).item())
+        H_gradients.append(torch.mean(H_gradient).item())
 
         # Calculate Frobenius norm objective
         objective = frobenius_norm_pytorch(V, S, H)
