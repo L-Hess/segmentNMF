@@ -250,11 +250,11 @@ def frobenius_norm_pytorch(V, S, H):
 
     Args:
         V: A PyTorch tensor representing the input data matrix.
-        spatial_components: A PyTorch tensor representing the spatial components matrix.
-        temporal_components: A PyTorch tensor representing the temporal components matrix.
+        S: A PyTorch tensor representing the spatial components matrix.
+        H: A PyTorch tensor representing the temporal components matrix.
 
     Returns:
-        A PyTorch tensor representing the Frobenius norm objective.
+        The Frobenius norm of the residual V - S @ H; scalar value.
     """
 
     # Calculate the Frobenius norm objective
