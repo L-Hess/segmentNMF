@@ -289,8 +289,6 @@ def nmf_pytorch(V, S_init, H_init, B, H_true=None, num_iterations=100, update_in
     H_init = torch.tensor(H_init, dtype=torch.float64)
     B = torch.tensor(B, dtype=torch.float64)
 
-    n_components = H_init.shape[0]
-
     # Check if GPU is available
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print('Using device: {}'.format(device))
@@ -328,7 +326,7 @@ def nmf_pytorch(V, S_init, H_init, B, H_true=None, num_iterations=100, update_in
         # Update S matrix with spatial constraint
         # All values outside of neighborhood B are set to 1e-12 for stability
         S_gradient = (V - S @ H) @ H.T
-        S_step_size = S_lr #/ torch.sum(H[:n_components] * H[:n_components], axis=1)[None, :]
+        S_step_size = S_lr #/ torch.sum(H * H, axis=1)[None, :]
         # S_lr = line_search_step_size(V, S, H, S_gradient, gradient_str='S',
         #                              objective_function=frobenius_norm_pytorch,
         #                              lr=S_step_size, alpha=1.01, beta=0.1)
