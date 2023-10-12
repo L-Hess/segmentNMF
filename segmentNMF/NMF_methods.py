@@ -21,13 +21,13 @@ def pearsonr_mat(X, Y, axis=0):
         A NumPy array containing the Pearson correlation coefficient between each row or column of X and Y.
     """
 
-    # Check if the dimensions of H and H_true match.
+    # Check if the dimensions of X and Y match.
     if X.shape != Y.shape:
-        raise ValueError("The dimensions of H and H_true must match.")
+        raise ValueError("The dimensions of X and Y must match.")
 
-    # Check if H and H_true are 2D arrays.
+    # Check if X and Y are 2D arrays.
     if X.ndim != 2 or Y.ndim != 2:
-        raise ValueError("H and H_true must be 2D arrays.")
+        raise ValueError("X and Y must be 2D arrays.")
 
     # Check if the axis parameter is valid.
     if axis not in range(X.ndim):
@@ -52,13 +52,24 @@ def pearsonr_mat(X, Y, axis=0):
 
 from scipy.stats import pearsonr
 
-def compare_with_true(H, H_true):
-    # Calculate Pearson correlation coefficient for each component
+def compare_with_true(X, Y, axis=0):
+    """Calculate Pearson correlation coefficient for each component
+
+    Args:
+        X: A 2D NumPy array.
+        Y: A 2D NumPy array with the same shape as X
+        axis: An integer indicating the axis along which to calculate the Pearson correlation coefficient.
+              Note this axis parameters has the opposite definition from the axis parameter for the
+              pearsonr_mat function
+
+    Returns:
+        A NumPy array containing the Pearson correlation coefficient between each row or column of X and Y.
+    """
     correlations = []
-    for i in range(H.shape[0]):
-        correlation, _ = pearsonr(H[i], H_true[i])
+    for i in range(X.shape[axis]):
+        correlation, _ = pearsonr(X[i], Y[i])
         correlations.append(correlation)
-    return correlations
+    return np.array(correlations)
 
 
 # ======================================================================================================================
