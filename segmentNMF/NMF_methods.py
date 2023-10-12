@@ -137,11 +137,11 @@ def frobenius_norm(V, S, H):
 
     Args:
         V: A NumPy array representing the input data matrix.
-        spatial_components: A NumPy array representing the spatial components matrix.
-        temporal_components: A NumPy array representing the temporal components matrix.
+        S: A NumPy array representing the spatial components matrix.
+        H: A NumPy array representing the temporal components matrix.
 
     Returns:
-        A NumPy array representing the Frobenius norm objective.
+        The Frobenius norm of the residual V - S @ H; scalar value.
     """
 
     # Calculate the Frobenius norm objective
@@ -178,9 +178,11 @@ def nmf(V, S_init, H_init, B, H_true=None, num_iterations=100, update_int=10, H_
     # If specified, add an additional 'noise' component
     if estimate_noise_component:
         noise_component = np.ones_like(S_init[:, 0]) / S_init.shape[0]
+        noise_time_component = np.zeros_like(H_init[0, :])
+        neighborhood_component = np.ones_like(B[:, 0])
         S_init = np.concatenate((S_init, noise_component[:, None]), axis=1)
-        H_init = np.concatenate((H_init, np.zeros_like(H_init[0, :])[None, :]), axis=0)
-        B = np.concatenate((B, np.ones_like(B[:, 0])[:, None]), axis=1)
+        H_init = np.concatenate((H_init, noise_time_component[None, :]), axis=0)
+        B = np.concatenate((B, neighborhood_component[:, None]), axis=1)
 
     objectives = []
     correlations = []
