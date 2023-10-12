@@ -194,15 +194,19 @@ def nmf(V, S_init, H_init, B, H_true=None, num_iterations=100, update_int=10, H_
     for i in tqdm(range(num_iterations)):
 
         # Update H matrix with dynamically estimated step size
+        # XXX I'm unsure about relu on the gradient. The optimization should have the
+        #     opportunity to correct previous over estimates by subtracting from them.
+        #     Can we apply relu to H itself after adding the gradient? This seems
+        #     conceptually more correct, since it is H that must be non-negative.
         H_gradient = np.maximum(0, S.T @ (V - S @ H))
-        H_step_size = H_lr / np.diag(S.T @ S)[:, None]
+        H_step_size = H_lr / np.sum(S * S, axis=0)[:, None]
         H.add_(H_step_size * H_gradient)
         H[np.isnan(H)] = 1e-12
 
         # Update S matrix with spatial constraint
         # All values outside of neighborhood B are set to 1e-12 for stability
         S_gradient = np.maximum(0, (V - S[:, :n_components] @ H[:n_components]) @ H[:n_components].T)
-        S_step_size = S_lr / np.diag(H[:n_components] @ H[:n_components].T)[None, :]
+        S_step_size = S_lr / np.sum(H[:n_components] * H[:n_components], axis=1)[None, :]
         S[:, :n_components].add_(S_step_size * S_gradient)
         S[np.logical_not(B)] = 1e-12
 
