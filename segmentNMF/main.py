@@ -165,6 +165,12 @@ def distributed_volume_NMF(segments_path: str, timeseries_path: str, spacing, bl
         timeseries = timeseries_vol[coords_ts]
         timeseries = timeseries.astype('float32')
 
+        if segments_hr_vol is not None:
+            diff_spacing = (spacing / spacing_highres).astype(int)
+            coords_hr = tuple([slice(int(c.start*spacing), int(c.stop*spacing))
+                               for c, spacing in zip(coords, diff_spacing)])
+            segments_hr = segments_hr_vol[coords_hr]
+
         # if not done already, cut off as much of the full segment volume as possible
         # TODO: check for boundaries to encompass neighborhoods
         if not estimate_optimal_order:
@@ -180,14 +186,10 @@ def distributed_volume_NMF(segments_path: str, timeseries_path: str, spacing, bl
             segments = segments[nonzero_sl_masks]
             timeseries = timeseries[nonzero_sl_ts]
 
-        if segments_hr_vol is not None:
-            diff_spacing = (spacing / spacing_highres).astype(int)
-            coords_hr = tuple([slice(int(c.start*spacing), int(c.stop*spacing))
-                               for c, spacing in zip(coords, diff_spacing)])
-            segments_hr = segments_hr_vol[coords_hr]
-            nonzero_sl_masks_hr = tuple([slice(min_ * spacing, max_ * spacing + 1)
-                                         for min_, max_, spacing in zip(nz_min, nz_max, diff_spacing)])
-            segments_hr = segments_hr[nonzero_sl_masks_hr]
+            if segments_hr_vol is not None:
+                nonzero_sl_masks_hr = tuple([slice(min_ * spacing, max_ * spacing + 1)
+                                             for min_, max_, spacing in zip(nz_min, nz_max, diff_spacing)])
+                segments_hr = segments_hr[nonzero_sl_masks_hr]
 
         print('total load time {:.2f}s'.format(time.time() - t_start))
 
