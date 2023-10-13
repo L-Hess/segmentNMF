@@ -202,7 +202,6 @@ def nmf(V, S_init, H_init, B, H_true=None, num_iterations=100, update_int=10, H_
         H_gradient *= H_step_size
         H += H_gradient
         H = np.maximum(0, H)
-        H[np.isnan(H)] = 1e-12  # XXX theoretically there should never be any NaNs. Should investigate.
 
         # Update S matrix with spatial constraint
         # All values outside of neighborhood B are set to 1e-12 for stability
