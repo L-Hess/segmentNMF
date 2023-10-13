@@ -193,15 +193,19 @@ def distributed_volume_NMF(segments_path: str, timeseries_path: str, spacing, bl
 
         print('total load time {:.2f}s'.format(time.time() - t_start))
 
-        # Translate timeseries data to [enforce positivity
+        # Translate timeseries data to enforce positivity
         timeseries -= timeseries.min()
 
         # Determine which segments are within the block
-        unique_segments = np.unique(segments)[1:]
+        unique_segments = np.unique(segments)
+        if unique_segments[0] == 0:
+            unique_segments = unique_segments[1:]
         N_cells = len(unique_segments)
 
         # Also determine which segments are within the inner block
-        unique_segments_inner = np.unique(segments_inner)[1:]
+        unique_segments_inner = np.unique(segments_inner)
+        if unique_segments_inner[0] == 0:
+            unique_segments_inner = unique_segments_inner[1:]
 
         # Only run NMF if more than 1 segment is present in the block
         if N_cells == 0:
