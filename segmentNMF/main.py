@@ -161,7 +161,7 @@ def distributed_volume_NMF(segments_path: str, timeseries_path: str, spacing, bl
         segments = segments_vol[coords]
         segments_inner = segments_vol[coords_inner]
 
-        coords_ts = tuple([slice(0, T)] + list(coords))
+        coords_ts = (slice(0, T),) + coords
         timeseries = timeseries_vol[coords_ts]
         timeseries = timeseries.astype('float32')
 
