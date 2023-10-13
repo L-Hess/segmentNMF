@@ -98,6 +98,7 @@ def neighborhood_by_distance(S, segments_shape, spacing, max_dist, subsample=Non
         segments_shape (tuple): The shape of the segmented volumes.
         spacing (float or tuple): The voxel spacing in each dimension.
         max_dist (float): The maximum distance for expansion.
+        subsample (iterable): Factors by which to skip sample each axis
 
     Returns:
         ndarray: The expanded segmentation labels.
@@ -119,3 +120,4 @@ def neighborhood_by_distance(S, segments_shape, spacing, max_dist, subsample=Non
             Bi = Bi[::subsample[0], ::subsample[1], ::subsample[2]]
         B_res[:, c_i] = Bi.reshape(B_res[:, c_i].shape)
     return B_res
+
