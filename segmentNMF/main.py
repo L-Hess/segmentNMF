@@ -165,19 +165,20 @@ def distributed_volume_NMF(segments_path: str, timeseries_path: str, spacing, bl
         timeseries = timeseries_vol[coords_ts]
         timeseries = timeseries.astype('float32')
 
-        # cut off as much of the full segment volume as possible
-        # TODO: check for boundaries to encopass neighborhoods
-        nonzero_inds = np.where(segments != 0)
-
-        nz_min = np.min(nonzero_inds, axis=1)
-        nz_max = np.max(nonzero_inds, axis=1)
-
-        nonzero_sl_masks = tuple([slice(min_, max_ + 1) for min_, max_ in zip(nz_min, nz_max)])
-        nonzero_sl_ts = tuple([slice(0, T)] + [slice(min_, max_ + 1) for min_, max_ in zip(nz_min, nz_max)])
-        # nonzero_sl_ts = tuple([slice(min_, max_ + 1) for min_, max_ in zip(nz_min, nz_max)] + [slice(0, T)])
-
-        segments = segments[nonzero_sl_masks]
-        timeseries = timeseries[nonzero_sl_ts]
+        # if not done already, cut off as much of the full segment volume as possible
+        # TODO: check for boundaries to encompass neighborhoods
+        if not estimate_optimal_order:
+            nonzero_inds = np.where(segments != 0)
+    
+            nz_min = np.min(nonzero_inds, axis=1)
+            nz_max = np.max(nonzero_inds, axis=1)
+    
+            nonzero_sl_masks = tuple([slice(min_, max_ + 1) for min_, max_ in zip(nz_min, nz_max)])
+            nonzero_sl_ts = tuple([slice(0, T)] + [slice(min_, max_ + 1) for min_, max_ in zip(nz_min, nz_max)])
+            # nonzero_sl_ts = tuple([slice(min_, max_ + 1) for min_, max_ in zip(nz_min, nz_max)] + [slice(0, T)])
+    
+            segments = segments[nonzero_sl_masks]
+            timeseries = timeseries[nonzero_sl_ts]
 
         if segments_hr_vol is not None:
             diff_spacing = (spacing / spacing_highres).astype(int)
