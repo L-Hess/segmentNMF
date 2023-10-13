@@ -28,6 +28,7 @@ def distributed_volume_NMF(segments_path: str, timeseries_path: str, spacing, bl
         timeseries_path (str): Path to the 4D volume containing timeseries data.
         spacing (tuple): Voxel size in (z, x, y) dimensions for the input data.
         blocksize (tuple): Size of blocks used for computation in (z, x, y) dimensions.
+        block_results_path (str)
         NMF_kwargs (dict, optional): Additional keyword arguments for NMF.
         segments_highres_path (str, optional): Path to the high-resolution 3D volume containing segments/masks.
         spacing_highres (tuple, optional): Voxel size in (z, x, y) dimensions for the high-resolution data.
@@ -159,7 +160,6 @@ def distributed_volume_NMF(segments_path: str, timeseries_path: str, spacing, bl
         
         segments = segments_vol[coords]
         segments_inner = segments_vol[coords_inner]
-        # logger.info('loaded segments into memory')
 
         coords_ts = tuple([slice(0, T)] + list(coords))
         timeseries = timeseries_vol[coords_ts]
