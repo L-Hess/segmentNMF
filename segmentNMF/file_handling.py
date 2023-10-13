@@ -45,7 +45,7 @@ def file_handler(file_path):
         file_path (str): The path to the file.
 
     Returns:
-        ndarray or zarr.core.Array: The loaded data.
+        zarr.core.Array: The loaded data.
 
     Raises:
         ValueError: If the file type is unsupported.
