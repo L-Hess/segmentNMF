@@ -21,13 +21,13 @@ def pearsonr_mat(X, Y, axis=0):
         A NumPy array containing the Pearson correlation coefficient between each row or column of X and Y.
     """
 
-    # Check if the dimensions of H and H_true match.
+    # Check if the dimensions of X and Y match.
     if X.shape != Y.shape:
-        raise ValueError("The dimensions of H and H_true must match.")
+        raise ValueError("The dimensions of X and Y must match.")
 
-    # Check if H and H_true are 2D arrays.
+    # Check if X and Y are 2D arrays.
     if X.ndim != 2 or Y.ndim != 2:
-        raise ValueError("H and H_true must be 2D arrays.")
+        raise ValueError("X and Y must be 2D arrays.")
 
     # Check if the axis parameter is valid.
     if axis not in range(X.ndim):
@@ -52,13 +52,24 @@ def pearsonr_mat(X, Y, axis=0):
 
 from scipy.stats import pearsonr
 
-def compare_with_true(H, H_true):
-    # Calculate Pearson correlation coefficient for each component
+def compare_with_true(X, Y, axis=0):
+    """Calculate Pearson correlation coefficient for each component
+
+    Args:
+        X: A 2D NumPy array.
+        Y: A 2D NumPy array with the same shape as X
+        axis: An integer indicating the axis along which to calculate the Pearson correlation coefficient.
+              Note this axis parameters has the opposite definition from the axis parameter for the
+              pearsonr_mat function
+
+    Returns:
+        A NumPy array containing the Pearson correlation coefficient between each row or column of X and Y.
+    """
     correlations = []
-    for i in range(H.shape[0]):
-        correlation, _ = pearsonr(H[i], H_true[i])
+    for i in range(X.shape[axis]):
+        correlation, _ = pearsonr(X[i], Y[i])
         correlations.append(correlation)
-    return correlations
+    return np.array(correlations)
 
 
 # ======================================================================================================================
@@ -74,7 +85,7 @@ def line_search_step_size(V, S, H, gradient, objective_function, gradient_str='S
         H: A PyTorch tensor representing the temporal components matrix.
         gradient: A PyTorch tensor representing the gradient of the objective function with respect to the parameter.
         objective_function: A function that takes the input data matrix, the spatial components matrix, and the temporal components matrix and returns the objective value.
-        is_gradient_for_s: A boolean indicating whether the gradient belongs to S or to H.
+        gradient_str: A string indicating whether gradient is for S or H. Only valid values are 'S' and 'H'
         lr: The initial learning rate.
         alpha: The strong Wolfe line search parameter.
         beta: The backtracking factor.
@@ -111,7 +122,7 @@ def line_search_step_size(V, S, H, gradient, objective_function, gradient_str='S
         # Otherwise, reduce the step size and try again
         else:
             step_size *= beta
-            print(gradient_str + ': final step size {}'.format(step_size))
+            print(gradient_str + ': new line search step size {}'.format(step_size))
 
     print(gradient_str + ': final step size {}'.format(step_size))
     return step_size
@@ -126,11 +137,11 @@ def frobenius_norm(V, S, H):
 
     Args:
         V: A NumPy array representing the input data matrix.
-        spatial_components: A NumPy array representing the spatial components matrix.
-        temporal_components: A NumPy array representing the temporal components matrix.
+        S: A NumPy array representing the spatial components matrix.
+        H: A NumPy array representing the temporal components matrix.
 
     Returns:
-        A NumPy array representing the Frobenius norm objective.
+        The Frobenius norm of the residual V - S @ H; scalar value.
     """
 
     # Calculate the Frobenius norm objective
@@ -167,9 +178,11 @@ def nmf(V, S_init, H_init, B, H_true=None, num_iterations=100, update_int=10, H_
     # If specified, add an additional 'noise' component
     if estimate_noise_component:
         noise_component = np.ones_like(S_init[:, 0]) / S_init.shape[0]
+        noise_time_component = np.zeros_like(H_init[0, :])
+        neighborhood_component = np.ones_like(B[:, 0])
         S_init = np.concatenate((S_init, noise_component[:, None]), axis=1)
-        H_init = np.concatenate((H_init, np.zeros_like(H_init[0, :])[None, :]), axis=0)
-        B = np.concatenate((B, np.ones_like(B[:, 0])[:, None]), axis=1)
+        H_init = np.concatenate((H_init, noise_time_component[None, :]), axis=0)
+        B = np.concatenate((B, neighborhood_component[:, None]), axis=1)
 
     objectives = []
     correlations = []
@@ -181,21 +194,25 @@ def nmf(V, S_init, H_init, B, H_true=None, num_iterations=100, update_int=10, H_
     for i in tqdm(range(num_iterations)):
 
         # Update H matrix with dynamically estimated step size
-        H_gradient = np.relu(S.T @ (V - S @ H))
-        H_step_size = H_lr / np.diag(S.T @ S)[:, None]
-        H.add_(H_step_size * H_gradient)
-        H[np.isnan(H)] = 1e-12
+        H_gradient = S.T @ (V - S @ H)
+        H_step_size = H_lr / np.sum(S * S, axis=0)[:, None]
+        H_gradient *= H_step_size
+        H += H_gradient
+        H = np.maximum(0, H)
+        H[np.isnan(H)] = 1e-12  # XXX theoretically there should never be any NaNs. Should investigate.
 
         # Update S matrix with spatial constraint
         # All values outside of neighborhood B are set to 1e-12 for stability
-        S_gradient = np.relu((V - S[:, :n_components] @ H[:n_components]) @ H[:n_components].T)
-        S_step_size = S_lr / np.diag(H[:n_components] @ H[:n_components].T)[None, :]
-        S[:, :n_components].add_(S_step_size * S_gradient)
+        S_gradient = (V - S[:, :n_components] @ H[:n_components]) @ H[:n_components].T
+        S_step_size = S_lr / np.sum(H[:n_components] * H[:n_components], axis=1)[None, :]
+        S_gradient *= S_step_size
+        S[:, :n_components] += S_gradient
+        S = np.maximum(0, S)
         S[np.logical_not(B)] = 1e-12
 
         # Save gradient steps
-        S_gradients.append(np.mean(S_step_size * S_gradient))
-        H_gradients.append(np.mean(H_step_size * H_gradient))
+        S_gradients.append(np.mean(S_gradient))
+        H_gradients.append(np.mean(H_gradient))
 
         # Calculate Frobenius norm objective
         objective = frobenius_norm(V, S, H)
@@ -206,19 +223,24 @@ def nmf(V, S_init, H_init, B, H_true=None, num_iterations=100, update_int=10, H_
             progress_str = 'Iteration {} | Objective: {:.6f} | avg H step {:.10f} | avg S step {:.10f}'.format(
                 i, objectives[i], np.mean(H_gradients[i]), np.mean(S_gradients[i]))
             if H_true is not None:
-                correlation = pearsonr_mat(H.roll(-1, axis=0)[:H_true.shape[0]].cpu().numpy(), H_true, axis=0)
-                progress_str += ' | avg corr {:.5f} | min corr {:.5f}'.format(np.mean(correlations[i]),
-                                                                              np.min(correlations[i]))
+                correlations.append(pearsonr_mat(H.roll(-1, axis=0)[:H_true.shape[0]], H_true, axis=0))
+                progress_str += ' | avg corr {:.5f} | min corr {:.5f}'.format(np.mean(correlations[-1]),
+                                                                              np.min(correlations[-1]))
             tqdm.tqdm.write(progress_str)
 
         # Check stopping criterion
-        if objective_threshold is not None \
-                and i > min_iterations \
-                and abs(objectives[i] - objectives[i - 1]) < objective_threshold or objectives[i] > objectives[i - 1]:
-            print('Reached stopping criterion (d objective < {})'.format(objective_threshold))
-            break
+        if objective_threshold is not None and i > min_iterations:
+            if abs(objectives[i] - objectives[i - 1]) < objective_threshold:
+                print('Reached stopping criterion (d objective < {})'.format(objective_threshold))
+                break
+            if objectives[i] > objectives[i - 1]:
+                print('Objective increased: [i-1]: {}, [i]: {}'.format(objectives[i-1], objectives[i]))
+                break
 
-    return S, H, objectives
+    if H_true is not None:
+        return S, H, objectives, correlations
+    else:
+        return S, H, objectives
 
 # ======================================================================================================================
 # Pytorch-based implementation
@@ -229,11 +251,11 @@ def frobenius_norm_pytorch(V, S, H):
 
     Args:
         V: A PyTorch tensor representing the input data matrix.
-        spatial_components: A PyTorch tensor representing the spatial components matrix.
-        temporal_components: A PyTorch tensor representing the temporal components matrix.
+        S: A PyTorch tensor representing the spatial components matrix.
+        H: A PyTorch tensor representing the temporal components matrix.
 
     Returns:
-        A PyTorch tensor representing the Frobenius norm objective.
+        The Frobenius norm of the residual V - S @ H; scalar value.
     """
 
     # Calculate the Frobenius norm objective
@@ -243,22 +265,21 @@ def frobenius_norm_pytorch(V, S, H):
 
 
 def nmf_pytorch(V, S_init, H_init, B, H_true=None, num_iterations=100, update_int=10, H_lr: float = 1.,
-                S_lr: float = 1, objective_threshold: float = 1e-2, min_iterations: int = 50):
+                S_lr: float = 1e-6, objective_threshold: float = 1e-2, min_iterations: int = 50):
 
     """Compute NMF using gradient descent
 
     Args:
-        V: A PyTorch tensor representing the input data matrix.
-        S_init: A PyTorch tensor representing the initial spatial components matrix.
-        H_init: A PyTorch tensor representing the initial temporal components matrix.
-        B: A PyTorch tensor representing the neighborhood matrix.
+        V: A NumPy array or PyTorch tensor representing the input data matrix.
+        S_init: A NumPy array or PyTorch tensor representing the initial spatial components matrix.
+        H_init: A NumPy array or PyTorch tensor representing the initial temporal components matrix.
+        B: A NumPy array or PyTorch tensor representing the neighborhood matrix.
         H_true: A PyTorch tensor representing the true temporal components matrix (optional).
         num_iterations: The number of iterations to run the algorithm for (default: 100).
         update_int: The interval at which to display progress updates (default: 10).
         H_lr: The learning rate for the H matrix (default: 1).
         S_lr: The learning rate for the S matrix (default: 1e-6).
-        objective_threshold: The stopping criterion for the objective (default: 1e-6).
-        estimate_noise_component: Whether to estimate a noise component (default: True).
+        objective_threshold: The stopping criterion for the objective (default: 1e-2).
         min_iterations: The minimum number of iterations to run the algorithm for (default: 50).
 
     Returns:
@@ -270,8 +291,6 @@ def nmf_pytorch(V, S_init, H_init, B, H_true=None, num_iterations=100, update_in
     S_init = torch.tensor(S_init, dtype=torch.float64)
     H_init = torch.tensor(H_init, dtype=torch.float64)
     B = torch.tensor(B, dtype=torch.float64)
-
-    n_components = H_init.shape[0]
 
     # Check if GPU is available
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -299,28 +318,30 @@ def nmf_pytorch(V, S_init, H_init, B, H_true=None, num_iterations=100, update_in
 
         # Update H matrix with dynamically estimated step size
         H_gradient = S.T @ (V - S @ H)
-        H_step_size = (H_lr / torch.diag(S.T @ S))[:, None]
+        H_step_size = H_lr / torch.sum(S * S, axis=0)[:, None]
         # H_lr = line_search_step_size(V, S, H, H_gradient, gradient_str='H',
         #                                     objective_function=frobenius_norm_pytorch,
         #                                     lr=H_step_size, alpha=1, beta=0.9)
-        H.add_(H_step_size * H_gradient)
+        H_gradient *= H_step_size
+        H.add_(H_gradient)
         H[torch.isnan(H)] = 1e-12
         H = torch.relu(H)
 
         # Update S matrix with spatial constraint
         # All values outside of neighborhood B are set to 1e-12 for stability
         S_gradient = (V - S @ H) @ H.T
-        S_step_size = S_lr #/ torch.diag(H[:n_components] @ H[:n_components].T)[None, :]
+        S_step_size = S_lr #/ torch.sum(H * H, axis=1)[None, :]
         # S_lr = line_search_step_size(V, S, H, S_gradient, gradient_str='S',
         #                              objective_function=frobenius_norm_pytorch,
         #                              lr=S_step_size, alpha=1.01, beta=0.1)
-        S.add_(S_step_size * S_gradient)
+        S_gradient *= S_step_size
+        S.add_(S_gradient)
         S[torch.logical_not(B)] = 1e-12
         S = torch.relu(S)
 
         # Save gradient steps
-        S_gradients.append(torch.mean(S_step_size * S_gradient).item())
-        H_gradients.append(torch.mean(H_step_size * H_gradient).item())
+        S_gradients.append(torch.mean(S_gradient).item())
+        H_gradients.append(torch.mean(H_gradient).item())
 
         # Calculate Frobenius norm objective
         objective = frobenius_norm_pytorch(V, S, H)
@@ -338,11 +359,13 @@ def nmf_pytorch(V, S_init, H_init, B, H_true=None, num_iterations=100, update_in
             print(progress_str)
 
         # Check stopping criterion
-        if objective_threshold is not None \
-                and i > min_iterations \
-                and abs(objectives[i] - objectives[i - 1]) < objective_threshold or objectives[i] > objectives[i - 1]:
-            print('Reached stopping criterion (d objective < {})'.format(objective_threshold))
-            break
+        if objective_threshold is not None and i > min_iterations:
+            if abs(objectives[i] - objectives[i - 1]) < objective_threshold:
+                print('Reached stopping criterion (d objective < {})'.format(objective_threshold))
+                break
+            if objectives[i] > objectives[i - 1]:
+                print('Objective increased: [i-1]: {}, [i]: {}'.format(objectives[i-1], objectives[i]))
+                break
 
     # Move tensors back to the CPU
     S = S.cpu().numpy()
