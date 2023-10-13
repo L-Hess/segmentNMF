@@ -189,6 +189,9 @@ def nmf(V, S_init, H_init, B, H_true=None, num_iterations=100, update_int=10, H_
     H_gradients = []
     S_gradients = []
 
+    S = S_init
+    H = H_init
+
     print('Run gradient NMF | max iterations: {}'.format(num_iterations))
     # Perform projected gradient iterations
     for i in tqdm(range(num_iterations)):
