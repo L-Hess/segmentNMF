@@ -207,7 +207,7 @@ def distributed_volume_NMF(segments_path: str, timeseries_path: str, spacing, bl
         if unique_segments_inner[0] == 0:
             unique_segments_inner = unique_segments_inner[1:]
 
-        # Only run NMF if more than 1 segment is present in the block
+        # Only run NMF if 1 or more segments are present in the block
         if N_cells == 0:
             return block_index, ([], [], [], [], [])
         else:
