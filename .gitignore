@@ -1,6 +1,6 @@
 # ignore build files
 build/
-bigstream.egg-info/
+segmentNMF.egg-info/
 dist/
 
 # ignore compiled files
