@@ -229,7 +229,7 @@ def nmf(V, S_init, H_init, B, H_true=None, num_iterations=100, update_int=10, H_
                 correlations.append(pearsonr_mat(H.roll(-1, axis=0)[:H_true.shape[0]], H_true, axis=0))
                 progress_str += ' | avg corr {:.5f} | min corr {:.5f}'.format(np.mean(correlations[-1]),
                                                                               np.min(correlations[-1]))
-            tqdm.tqdm.write(progress_str)
+            tqdm.write(progress_str)
 
         # Check stopping criterion
         if objective_threshold is not None and i > min_iterations:
