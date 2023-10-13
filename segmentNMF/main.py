@@ -213,8 +213,8 @@ def distributed_volume_NMF(segments_path: str, timeseries_path: str, spacing, bl
         else:
             # Set up V matrix
             V = timeseries.reshape(timeseries.shape[0], np.prod(timeseries.shape[1:])).T
-            V /= (V.mean(1, keepdims=True))
-            V[np.isnan(V)] = 1e-12
+            V /= (V.mean(1, keepdims=True))  # XXX this is not df/f but just normalizing to a mean baseline?
+            V[np.isnan(V)] = 1e-12  # XXX there should never be NaNs unless a camera pixel failed
 
             # Set up S matrix
             S = np.zeros(shape=(np.prod(segments.shape), N_cells))
@@ -237,7 +237,7 @@ def distributed_volume_NMF(segments_path: str, timeseries_path: str, spacing, bl
 
             # define H_init and S_init
             H_init = np.zeros(shape=(N_cells, T))
-            S_init = S / (np.sum(S, axis=0, keepdims=True) + 1e-12)
+            S_init = S / (np.sum(S, axis=0, keepdims=True) + 1e-12)  # XXX why should all cells have unit mass? Cell size is significant no?
 
             S, H, _ = nmf_pytorch(V=V,
                                   S_init=S_init,
@@ -245,6 +245,7 @@ def distributed_volume_NMF(segments_path: str, timeseries_path: str, spacing, bl
                                   B=B,
                                   **NMF_kwargs)
 
+            # XXX GF stopped reviewing here - look again after some testing
             # Take slices of the spatial components only of where there are values (corresponding to the neighborhood)
             # Save the slices and the slice values
             S_sliced = np.empty(S.shape[1], dtype=object)
