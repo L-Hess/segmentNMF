@@ -210,7 +210,7 @@ def nmf(V, S_init, H_init, B, H_true=None, num_iterations=100, update_int=10, H_
         S_gradient *= S_step_size * B
         S[:, :n_components] += S_gradient
         S = np.maximum(0, S)
-        S = np.minimum(1, S)  # XXX what is the significance of a spatial component voxel greater than 1?
+        S /= np.max(S, axis=0, keepdims=True)  # we want amplitude in temporal not spatial components
 
         # Save gradient steps
         S_gradients.append(np.mean(S_gradient))
