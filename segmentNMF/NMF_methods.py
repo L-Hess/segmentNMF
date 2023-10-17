@@ -207,11 +207,10 @@ def nmf(V, S_init, H_init, B, H_true=None, num_iterations=100, update_int=10, H_
         # All values outside of neighborhood B are set to 1e-12 for stability
         S_gradient = (V - S[:, :n_components] @ H[:n_components]) @ H[:n_components].T
         S_step_size = S_lr / np.sum(H[:n_components] * H[:n_components], axis=1)[None, :]
-        S_gradient *= S_step_size
+        S_gradient *= S_step_size * B
         S[:, :n_components] += S_gradient
         S = np.maximum(0, S)
         S = np.minimum(1, S)  # XXX what is the significance of a spatial component voxel greater than 1?
-        S[np.logical_not(B)] = 0
 
         # Save gradient steps
         S_gradients.append(np.mean(S_gradient))
