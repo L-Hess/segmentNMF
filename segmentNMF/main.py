@@ -28,6 +28,7 @@ def distributed_volume_NMF(segments_path: str, timeseries_path: str, spacing, bl
         timeseries_path (str): Path to the 4D volume containing timeseries data.
         spacing (tuple): Voxel size in (z, x, y) dimensions for the input data.
         blocksize (tuple): Size of blocks used for computation in (z, x, y) dimensions.
+        block_results_path (str)
         NMF_kwargs (dict, optional): Additional keyword arguments for NMF.
         segments_highres_path (str, optional): Path to the high-resolution 3D volume containing segments/masks.
         spacing_highres (tuple, optional): Voxel size in (z, x, y) dimensions for the high-resolution data.
@@ -159,55 +160,61 @@ def distributed_volume_NMF(segments_path: str, timeseries_path: str, spacing, bl
         
         segments = segments_vol[coords]
         segments_inner = segments_vol[coords_inner]
-        # logger.info('loaded segments into memory')
 
-        coords_ts = tuple([slice(0, T)] + list(coords))
+        coords_ts = (slice(0, T),) + coords
         timeseries = timeseries_vol[coords_ts]
         timeseries = timeseries.astype('float32')
-
-        # cut off as much of the full segment volume as possible
-        # TODO: check for boundaries to encopass neighborhoods
-        nonzero_inds = np.where(segments != 0)
-
-        nz_min = np.min(nonzero_inds, axis=1)
-        nz_max = np.max(nonzero_inds, axis=1)
-
-        nonzero_sl_masks = tuple([slice(min_, max_ + 1) for min_, max_ in zip(nz_min, nz_max)])
-        nonzero_sl_ts = tuple([slice(0, T)] + [slice(min_, max_ + 1) for min_, max_ in zip(nz_min, nz_max)])
-        # nonzero_sl_ts = tuple([slice(min_, max_ + 1) for min_, max_ in zip(nz_min, nz_max)] + [slice(0, T)])
-
-        segments = segments[nonzero_sl_masks]
-        timeseries = timeseries[nonzero_sl_ts]
 
         if segments_hr_vol is not None:
             diff_spacing = (spacing / spacing_highres).astype(int)
             coords_hr = tuple([slice(int(c.start*spacing), int(c.stop*spacing))
                                for c, spacing in zip(coords, diff_spacing)])
             segments_hr = segments_hr_vol[coords_hr]
-            nonzero_sl_masks_hr = tuple([slice(min_ * spacing, max_ * spacing + 1)
-                                         for min_, max_, spacing in zip(nz_min, nz_max, diff_spacing)])
-            segments_hr = segments_hr[nonzero_sl_masks_hr]
+
+        # if not done already, cut off as much of the full segment volume as possible
+        # TODO: check for boundaries to encompass neighborhoods
+        if not estimate_optimal_order:
+            nonzero_inds = np.where(segments != 0)
+    
+            nz_min = np.min(nonzero_inds, axis=1)
+            nz_max = np.max(nonzero_inds, axis=1)
+    
+            nonzero_sl_masks = tuple([slice(min_, max_ + 1) for min_, max_ in zip(nz_min, nz_max)])
+            nonzero_sl_ts = tuple([slice(0, T)] + [slice(min_, max_ + 1) for min_, max_ in zip(nz_min, nz_max)])
+            # nonzero_sl_ts = tuple([slice(min_, max_ + 1) for min_, max_ in zip(nz_min, nz_max)] + [slice(0, T)])
+    
+            segments = segments[nonzero_sl_masks]
+            timeseries = timeseries[nonzero_sl_ts]
+
+            if segments_hr_vol is not None:
+                nonzero_sl_masks_hr = tuple([slice(min_ * spacing, max_ * spacing + 1)
+                                             for min_, max_, spacing in zip(nz_min, nz_max, diff_spacing)])
+                segments_hr = segments_hr[nonzero_sl_masks_hr]
 
         print('total load time {:.2f}s'.format(time.time() - t_start))
 
-        # Translate timeseries data to [enforce positivity
+        # Translate timeseries data to enforce positivity
         timeseries -= timeseries.min()
 
         # Determine which segments are within the block
-        unique_segments = np.unique(segments)[1:]
+        unique_segments = np.unique(segments)
+        if unique_segments[0] == 0:
+            unique_segments = unique_segments[1:]
         N_cells = len(unique_segments)
 
         # Also determine which segments are within the inner block
-        unique_segments_inner = np.unique(segments_inner)[1:]
+        unique_segments_inner = np.unique(segments_inner)
+        if unique_segments_inner[0] == 0:
+            unique_segments_inner = unique_segments_inner[1:]
 
-        # Only run NMF if more than 1 segment is present in the block
+        # Only run NMF if 1 or more segments are present in the block
         if N_cells == 0:
             return block_index, ([], [], [], [], [])
         else:
             # Set up V matrix
             V = timeseries.reshape(timeseries.shape[0], np.prod(timeseries.shape[1:])).T
-            V /= (V.mean(1, keepdims=True))
-            V[np.isnan(V)] = 1e-12
+            V /= (V.mean(1, keepdims=True))  # XXX this is not df/f but just normalizing to a mean baseline?
+            V[np.isnan(V)] = 1e-12  # XXX there should never be NaNs unless a camera pixel failed
 
             # Set up S matrix
             S = np.zeros(shape=(np.prod(segments.shape), N_cells))
@@ -230,7 +237,7 @@ def distributed_volume_NMF(segments_path: str, timeseries_path: str, spacing, bl
 
             # define H_init and S_init
             H_init = np.zeros(shape=(N_cells, T))
-            S_init = S / (np.sum(S, axis=0, keepdims=True) + 1e-12)
+            S_init = S / (np.sum(S, axis=0, keepdims=True) + 1e-12)  # XXX why should all cells have unit mass? Cell size is significant no?
 
             S, H, _ = nmf_pytorch(V=V,
                                   S_init=S_init,
@@ -238,6 +245,7 @@ def distributed_volume_NMF(segments_path: str, timeseries_path: str, spacing, bl
                                   B=B,
                                   **NMF_kwargs)
 
+            # XXX GF stopped reviewing here - look again after some testing
             # Take slices of the spatial components only of where there are values (corresponding to the neighborhood)
             # Save the slices and the slice values
             S_sliced = np.empty(S.shape[1], dtype=object)

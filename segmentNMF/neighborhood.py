@@ -89,6 +89,40 @@ def distance_transform_edt_binary(arr, spacing):
     return dist_transform
 
 
+def neighborhood_by_weights(S, segments_shape, spacing, sigma, subsample=None):
+
+    """
+    Expand the segmentation labels with weights that fall off
+
+    Args:
+        S (ndarray): The segmentation labels.
+        segments_shape (tuple): The shape of the segmented volumes.
+        spacing (float or tuple): The voxel spacing in each dimension.
+        sigma (float): Standard deviation of exponential fall off for weights
+        subsample (iterable): Factors by which to skip sample each axis
+
+    Returns:
+        ndarray: The components spatial weights
+
+    """
+    B = (S > 0).astype(np.float32)
+
+    if subsample is not None:
+        B_res = B.reshape(*segments_shape, B.shape[1])
+        B_res = B_res[::subsample[0], ::subsample[1], ::subsample[2]]
+        B_res = B_res.reshape(np.prod(B_res.shape[:-1]), B.shape[-1])
+    else:
+        B_res = B
+
+    for c_i in range(B.shape[1]):
+        dists = distance_transform_edt_binary(B[:, c_i].reshape(segments_shape), spacing)
+        Bi = np.exp( -dists / sigma )
+        if subsample is not None:
+            Bi = Bi[::subsample[0], ::subsample[1], ::subsample[2]]
+        B_res[:, c_i] = Bi.reshape(B_res[:, c_i].shape)
+    return B_res
+
+
 def neighborhood_by_distance(S, segments_shape, spacing, max_dist, subsample=None):
     """
     Expand the segmentation labels by considering the Euclidean distance.
@@ -98,6 +132,7 @@ def neighborhood_by_distance(S, segments_shape, spacing, max_dist, subsample=Non
         segments_shape (tuple): The shape of the segmented volumes.
         spacing (float or tuple): The voxel spacing in each dimension.
         max_dist (float): The maximum distance for expansion.
+        subsample (iterable): Factors by which to skip sample each axis
 
     Returns:
         ndarray: The expanded segmentation labels.
@@ -119,3 +154,4 @@ def neighborhood_by_distance(S, segments_shape, spacing, max_dist, subsample=Non
             Bi = Bi[::subsample[0], ::subsample[1], ::subsample[2]]
         B_res[:, c_i] = Bi.reshape(B_res[:, c_i].shape)
     return B_res
+

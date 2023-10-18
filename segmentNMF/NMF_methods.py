@@ -189,6 +189,9 @@ def nmf(V, S_init, H_init, B, H_true=None, num_iterations=100, update_int=10, H_
     H_gradients = []
     S_gradients = []
 
+    S = S_init
+    H = H_init
+
     print('Run gradient NMF | max iterations: {}'.format(num_iterations))
     # Perform projected gradient iterations
     for i in tqdm(range(num_iterations)):
@@ -199,16 +202,15 @@ def nmf(V, S_init, H_init, B, H_true=None, num_iterations=100, update_int=10, H_
         H_gradient *= H_step_size
         H += H_gradient
         H = np.maximum(0, H)
-        H[np.isnan(H)] = 1e-12  # XXX theoretically there should never be any NaNs. Should investigate.
 
         # Update S matrix with spatial constraint
         # All values outside of neighborhood B are set to 1e-12 for stability
         S_gradient = (V - S[:, :n_components] @ H[:n_components]) @ H[:n_components].T
         S_step_size = S_lr / np.sum(H[:n_components] * H[:n_components], axis=1)[None, :]
-        S_gradient *= S_step_size
+        S_gradient *= S_step_size * B
         S[:, :n_components] += S_gradient
         S = np.maximum(0, S)
-        S[np.logical_not(B)] = 1e-12
+        S /= np.max(S, axis=0, keepdims=True)  # we want amplitude in temporal not spatial components
 
         # Save gradient steps
         S_gradients.append(np.mean(S_gradient))
@@ -221,12 +223,12 @@ def nmf(V, S_init, H_init, B, H_true=None, num_iterations=100, update_int=10, H_
         # Display progress update
         if i % update_int == 0:
             progress_str = 'Iteration {} | Objective: {:.6f} | avg H step {:.10f} | avg S step {:.10f}'.format(
-                i, objectives[i], np.mean(H_gradients[i]), np.mean(S_gradients[i]))
+                i, objectives[i], H_gradients[i], S_gradients[i])
             if H_true is not None:
                 correlations.append(pearsonr_mat(H.roll(-1, axis=0)[:H_true.shape[0]], H_true, axis=0))
                 progress_str += ' | avg corr {:.5f} | min corr {:.5f}'.format(np.mean(correlations[-1]),
                                                                               np.min(correlations[-1]))
-            tqdm.tqdm.write(progress_str)
+            tqdm.write(progress_str)
 
         # Check stopping criterion
         if objective_threshold is not None and i > min_iterations:
