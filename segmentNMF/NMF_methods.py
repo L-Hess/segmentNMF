@@ -326,20 +326,19 @@ def nmf_pytorch(V, S_init, H_init, B, H_true=None, num_iterations=100, update_in
         #                                     lr=H_step_size, alpha=1, beta=0.9)
         H_gradient *= H_step_size
         H.add_(H_gradient)
-        H[torch.isnan(H)] = 1e-12
         H = torch.relu(H)
 
         # Update S matrix with spatial constraint
         # All values outside of neighborhood B are set to 1e-12 for stability
         S_gradient = (V - S @ H) @ H.T
-        S_step_size = S_lr #/ torch.sum(H * H, axis=1)[None, :]
+        S_step_size = S_lr / torch.sum(H * H, axis=1)[None, :]
         # S_lr = line_search_step_size(V, S, H, S_gradient, gradient_str='S',
         #                              objective_function=frobenius_norm_pytorch,
         #                              lr=S_step_size, alpha=1.01, beta=0.1)
-        S_gradient *= S_step_size
+        S_gradient *= S_step_size * B
         S.add_(S_gradient)
-        S[torch.logical_not(B)] = 1e-12
         S = torch.relu(S)
+        S = S / torch.max(S, dim=0, keepdim=True).values
 
         # Save gradient steps
         S_gradients.append(torch.mean(S_gradient).item())
@@ -358,7 +357,7 @@ def nmf_pytorch(V, S_init, H_init, B, H_true=None, num_iterations=100, update_in
                 correlations.append(compare_with_true(H.cpu().numpy(), H_true))
                 progress_str += ' | avg corr {:.5f} | min corr {:.5f}'.format(np.nanmean(correlations[-1]),
                                                                               np.nanmin(correlations[-1]))
-            print(progress_str)
+            tqdm.write(progress_str)
 
         # Check stopping criterion
         if objective_threshold is not None and i > min_iterations:
