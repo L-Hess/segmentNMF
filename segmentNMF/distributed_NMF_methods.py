@@ -6,7 +6,7 @@ from scipy.ndimage import find_objects
 from scipy.spatial import cKDTree
 from segmentNMF.file_handling import create_temp_zarr
 from segmentNMF.neighborhood import neighborhood_by_weights
-from segmentNMF.NMF_methods import nmf
+from segmentNMF.NMF_methods import nmf, nmf_pytorch
 
 
 @cluster
@@ -21,6 +21,9 @@ def distributed_nmf(
     time_series_baseline=None,
     neighborhood_sigma=2.0,
     temporary_directory=None,
+    use_gpu=False,
+    N_output_segments=None,
+    recontruction_path=None,
     cluster=None,
     cluster_kwargs={},
     **kwargs,
@@ -79,6 +82,23 @@ def distributed_nmf(
         current directory. Temporary files are removed if the function completes
         successfully.
 
+    use_gpu : bool (default: False)
+        If False blocks are submitted to segmentNMF.NMF_methods.nmf function.
+        If True blocks are submitted to segmentNMF.NMF_methods.nmf_pytorch function.
+        The pytorch function can still run on a cpu, but requires more memory and
+        is slower. You should only set this to True if you have a cuda compatible
+        gpu available on your machine or your workers.
+
+    N_output_segments : int (default: None)
+        The number of rows in the output. If None, then the maximum integer value
+        found in the `segments` array is used. If this is not None then it must
+        be greater than the maximum integer value found in `segments`.
+
+    recontruction_path : string (default: None)
+        If not None, this should be a path to a place on disk where a zarr
+        array can be created to contain the reconstruction:
+        space_components @ time_components.
+
     cluster : ClusterWrap.cluster object (default: None)
         Only set if you have constructed your own static cluster. The default
         behavior is to construct a cluster for the duration of this function, then
@@ -98,12 +118,32 @@ def distributed_nmf(
 
     Returns
     -------
-    TODO XXX
+    time_components : 2d numpy.ndarray
+        The temporal component for every segment. This is an NxT array
+        where T is the number of time points (or frames) in the time_series_zarr
+        data. If `N_outout_segments` is None then N is equal to the maximum
+        integer value found in the `segments` array. If `N_output_segments` is
+        an integer then N is that number. Integer values not present in
+        the `segments` array are NaN value for all T.
     """
 
-    # find segment boxes, get centers, get neighbors
+    # TODO: need to rechunk input arrays for faster reading
+    # TODO: need to estimate compute costs
+
+    # get all segment ids
     segment_ids = np.unique(segments)
     if segment_ids[0] == 0: segment_ids = segment_ids[1:]
+
+    # ensure output format will make sense
+    if N_output_segments is not None:
+        error_message = "N_output_segments must exceed maximum integer "
+        error_message += "value in segments array\n. N_output_segments: "
+        error_message += f"{N_output_segments} np.max(segments): {segment_ids[-1]}"
+        assert (N_output_segments >= segment_ids[-1]), error_message
+    else:
+        N_output_segments = segment_ids[-1]
+
+    # find segment boxes, get centers, get neighbors
     boxes = [box for box in find_objects(segments) if box is not None]
     centers = [[(x.start + x.stop)/2. for x in slc] for slc in boxes]
     centers = np.array(centers) * segments_spacing
@@ -113,6 +153,7 @@ def distributed_nmf(
         distance_upper_bound=max_neighbor_distance,
     )
 
+    # TODO: THE BELOW TODO IS FIRST PRIORITY
     # TODO: THIS WHILE LOOP TAKES ABOUT 10 MINUTES, WE DON'T WANT THE CLUSTER WAITING
     # determine which segments will be unified to define compute blocks
     segment_unions = []
@@ -189,6 +230,8 @@ def distributed_nmf(
         )
         segments_zarr[...] = segments
 
+    # TODO: create a recontruction zarr array
+
 
     # the function to map on every block
     def nmf_per_block(segment_ids, time_series_crop, segments_crop):
@@ -237,20 +280,28 @@ def distributed_nmf(
         # format the temporal components
         H = np.zeros((n_labels, ts[0]), dtype=np.float32)
 
-        # TEMP XXX
-        S_init = np.copy(S)
-
         # run nmf
-        S_res, H_res, objectives = nmf(
-            V, S, H, B,
-            estimate_noise_component=False,
-            **kwargs,
-        )
+        if use_gpu:
+            S_res, H_res, objectives = nmf_pytorch(
+                V, S, H, B,
+                **kwargs,
+            )
+        else:
+            S_res, H_res, objectives = nmf(
+                V, S, H, B,
+                estimate_noise_component=False,
+                **kwargs,
+            )
 
-        # XXX TEMP XXX
-        return time_series, segments, S_init, S_res, H_res, objectives
+        # TODO: optionally write reconstruction to zarr array
+        #       need to keep track of number of times a voxel has been
+        #       summed to, have to deal with overlaps, this is actually
+        #       a nightmare
+        #       probably need to save all reconstructed patches separately
+        #       and fuse later
 
-        # TODO crop out and return only the segments we care about
+        # time series for the complete cells are what we really need
+        return H_res[:n_segments]
 
 
     # map nmf function on all blocks
@@ -260,10 +311,14 @@ def distributed_nmf(
         time_series_crops,
         segments_crops,
     )
+    segment_time_components = cluster.client.gather(futures)
 
-    # TODO: fuse all results into single array return with all necessary info
+    # construct the return array and send it
+    output_shape = (N_output_segments, time_series_zarr.shape[0])
+    all_time_components = np.empty(output_shape, dtype=np.float32)
+    all_time_components.fill(np.nan)
+    for segment_union, components in zip(segment_unions, segment_time_components):
+        for segment_id, component in zip(segment_union, components):
+            all_time_components[segment_id, :] = component
+    return all_time_components
 
-    # XXX TEMP XXX
-    return cluster.client.gather(futures)
-
-    
