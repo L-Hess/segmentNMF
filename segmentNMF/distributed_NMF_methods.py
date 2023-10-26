@@ -156,8 +156,7 @@ def distributed_nmf(
     print("this step can take a while, but don't worry, the cluster has not been constructed yet")
     segment_unions = []
     segments_assigned = np.zeros(len(segment_ids), dtype=bool)
-    temp_iii = 0
-    while not np.all(segments_assigned) and temp_iii < 1000:
+    while not np.all(segments_assigned):
 
         # first select smallest complete groups, then incomplete groups
         # with largest number of unassigned segments remaining
@@ -176,7 +175,6 @@ def distributed_nmf(
         segments_assigned[neighbor_ids] = True
         neighbor_dists[neighbor_ids] = np.inf
         neighbor_dists[np.isin(neighbors, neighbor_ids)] = np.inf
-        temp_iii += 1
 
     # compute box unions, expand by radius
     print('COMPUTING ALL CROPS')
