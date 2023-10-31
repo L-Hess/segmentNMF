@@ -1,12 +1,13 @@
 import os, tempfile
 import numpy as np
 import zarr
+import time
+import glob
 from ClusterWrap.decorator import cluster as cluster_decorator
 from scipy.ndimage import find_objects
 from scipy.spatial import cKDTree
 from segmentNMF.neighborhood import neighborhood_by_weights
 from segmentNMF.NMF_methods import nmf, nmf_pytorch
-from distributed import Lock, MultiLock
 
 
 def distributed_nmf(
@@ -140,9 +141,19 @@ def distributed_nmf(
     else:
         n_output_segments = segment_ids[-1]
 
-    # find segment boxes, get centers, get neighbors
+    # find segment boxes
     print('GETTING BOXES FOR EVERY SEGMENT')
     boxes = [box for box in find_objects(segments) if box is not None]
+
+    # TODO: this is a hack to deal with bad segments, need a more proper solution
+    bad_box_ids = []
+    for iii, box in enumerate(boxes):
+        sizes = np.array([x.stop - x.start for x in box])
+        if np.any(sizes > 40): bad_box_ids.append(iii)
+    segment_ids = [x for i, x in enumerate(segment_ids) if i not in bad_box_ids]
+    boxes = [x for i, x in enumerate(boxes) if i not in bad_box_ids]
+
+    # get centers, get neighbors
     centers = [[(x.start + x.stop)/2. for x in slc] for slc in boxes]
     centers = np.array(centers) * segments_spacing
     centers_tree = cKDTree(centers)
@@ -214,6 +225,7 @@ def distributed_nmf(
         temporary_directory = tempfile.TemporaryDirectory(
             prefix='.', dir=temporary_directory or os.getcwd(),
         )
+        temp_dir_path = temporary_directory.name
 
     # ensure segments are a zarr array
     # tried segmentNMF.file_handling.create_temp_zarr but dask was not
@@ -221,7 +233,7 @@ def distributed_nmf(
     segments_zarr = segments
     if not isinstance(segments_zarr, zarr.Array):
         zarr_chunks = (128,) * segments.ndim
-        segments_zarr_path = temporary_directory.name + '/segments.zarr'
+        segments_zarr_path = temp_dir_path + '/segments.zarr'
         segments_zarr = zarr.open(
             segments_zarr_path, 'w',
             shape=segments.shape,
@@ -240,7 +252,6 @@ def distributed_nmf(
             dtype=np.float32,
             synchronizer=zarr.ThreadSynchronizer(),
         )
-        locks = [Lock(f'{x}') for x in np.ndindex(*reconstruction_zarr.cdata_shape[1:])]
 
         # create weights array for reconstruction averaging
         reconstruction_weights = np.zeros(time_series_zarr.shape[1:], dtype=np.float32)
@@ -250,7 +261,7 @@ def distributed_nmf(
         reconstruction_weights = reconstruction_weights**-1
 
         # store reconstruction weights as zarr
-        rw_path = temporary_directory.name + '/reconstruction_weights.zarr'
+        rw_path = temp_dir_path + '/reconstruction_weights.zarr'
         reconstruction_weights_zarr = zarr.open(
             rw_path, 'w',
             shape=reconstruction_weights.shape,
@@ -262,7 +273,11 @@ def distributed_nmf(
 
 
     # the function to map on every block
-    def nmf_per_block(segment_ids, time_series_crop, segments_crop):
+    def nmf_per_block(
+        segment_ids,
+        time_series_crop,
+        segments_crop,
+    ):
 
         # read segments and time series
         time_series = time_series_zarr[(slice(None),) + time_series_crop]
@@ -323,37 +338,77 @@ def distributed_nmf(
             reconstruction = (S_res @ H_res).T.reshape(ts)
             reconstruction_weights = reconstruction_weights_zarr[time_series_crop]
             reconstruction *= reconstruction_weights[None, ...]
+            crop_string = '_'.join([f'{x.start}x{x.stop}' for x in time_series_crop])
 
-            # determine write blocks, i.e. acquire locks needed
-            chunk_shape = reconstruction_zarr.chunks[1:]
-            lower_bounds = np.floor([x.start / y for x, y in zip(time_series_crop, chunk_shape)])
-            upper_bounds = np.ceil([x.stop / y for x, y in zip(time_series_crop, chunk_shape)])
-            locks = []
-            for index in np.ndindex(*(upper_bounds - lower_bounds).astype(int)):
-                locks.append(str(tuple(x + y for x, y in zip(index, lower_bounds))))
-            lock = MultiLock(locks)
-            lock.acquire()
-
-            # sum weighted reconstruction into array, release locks when done
-            current = reconstruction_zarr[(slice(None),) + time_series_crop]
-            reconstruction_zarr[(slice(None),) + time_series_crop] = current + reconstruction
-            lock.release()
+            # ensure correct dtype then save
+            given_dtype = time_series_zarr.dtype
+            if reconstruction.dtype != given_dtype:
+                if give_dtype == int or np.issubdtype(given_dtype, np.integer):
+                    reconstruction = np.round(reconstruction)
+                reconstruction = reconstruction.astype(given_dtype)
+            np.save(temp_dir_path + '/chunk_' + crop_string + '.npy', reconstruction)
 
         # time series for the complete cells are what we really need
         return H_res[:n_segments]
 
 
+    def reconstruct_per_block(crop):
+
+        # load crop
+        crop_string = '_'.join([f'{x.start}x{x.stop}' for x in crop])
+        data_path = temp_dir_path + '/chunk_' + crop_string + '.npy'
+        data = np.load(data_path)
+ 
+        # update the zarr, remove the file
+        current = reconstruction_zarr[(slice(None),) + crop]
+        reconstruction_zarr[(slice(None),) + crop] = current + data
+        os.remove(data_path)
+        return True
+
+
     @cluster_decorator
     def map_all_blocks(cluster=None, cluster_kwargs={}):
+
+        # submit all blocks
         futures = cluster.client.map(
             nmf_per_block,
             segment_unions,
             time_series_crops,
             segments_crops,
         )
-        return cluster.client.gather(futures)
+        time_series = cluster.client.gather(futures)
 
-    # map all blocks
+        # run reconstruction loop
+        if reconstruction_path is not None:
+
+            # loop until all blocks are written
+            block_shape = reconstruction_zarr.chunks[1:]
+            written = np.zeros(len(segment_unions), dtype=bool)
+            while not np.all(written):
+
+                # determine which compute blocks can write in parallel
+                write_batch = []
+                block_flags = np.ones(reconstruction_zarr.cdata_shape[1:], dtype=bool)
+                for iii, crop in enumerate(time_series_crops):
+                    if written[iii]: continue
+                    f = lambda x, y: slice(x.start//y, (x.stop//y)+1)
+                    blocks_touched = tuple(f(x, y) for x, y in zip(crop, block_shape))
+                    if np.all(block_flags[blocks_touched]):
+                        write_batch.append(crop)
+                        written[iii] = True
+                        block_flags[blocks_touched] = False
+
+                # submit write batch
+                print(f'WRITING {len(write_batch)} BLOCKS')
+                futures = cluster.client.map(
+                    reconstruct_per_block, write_batch,
+                )
+                batch_written = cluster.client.gather(futures)
+
+        # return all time series
+        return time_series
+
+    # execute everything
     print('LAUNCHING CLUSTER, MAPPING ALL BLOCKS')
     segment_time_components = map_all_blocks(
         cluster=cluster, cluster_kwargs=cluster_kwargs,
