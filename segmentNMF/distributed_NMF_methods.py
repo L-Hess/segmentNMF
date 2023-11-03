@@ -201,19 +201,22 @@ def distributed_nmf(
 
     # compute time series crops
     sampling_ratio = segments_spacing / time_series_spacing
-    def ts_box_from_seg_box(box):
-        start = [int(np.floor(x.start*r)) for x, r in zip(box, sampling_ratio)]
-        stop = [int(np.ceil(x.stop*r)) for x, r in zip(box, sampling_ratio)]
+    def seg_to_ts_box(box):
+        start = [int(np.round(x.start*r)) for x, r in zip(box, sampling_ratio)]
+        stop = [int(np.round((x.stop-1)*r))+1 for x, r in zip(box, sampling_ratio)]
         return tuple(slice(x, y) for x, y in zip(start, stop))
-    time_series_crops = [ts_box_from_seg_box(box) for box in box_unions]
+    time_series_crops = [seg_to_ts_box(box) for box in box_unions]
 
-    # compute segments crops (not the same as box_unions due to floor/ceil above)
-    sampling_ratio = (1. / sampling_ratio)
-    def seg_box_from_ts_box(box):
-        start = [int(np.floor(x.start*r)) for x, r in zip(box, sampling_ratio)]
-        stop = [int(np.floor(x.stop*r)) for x, r in zip(box, sampling_ratio)]
+    # compute segments crops
+    sampling_ratio = time_series_spacing / segments_spacing
+    radius = np.round((sampling_ratio - 1) / 2).astype(int)
+    def ts_to_seg_box(box):
+        start = [int(np.round(x.start*r)) for x, r in zip(box, sampling_ratio)]
+        stop = [int(np.round((x.stop-1)*r))+1 for x, r in zip(box, sampling_ratio)]
+        start = [max(0, x-r) for x, r in zip(start, radius)]
+        stop = [min(s, x+r) for x, r, s in zip(stop, radius, segments.shape)]
         return tuple(slice(x, y) for x, y in zip(start, stop))
-    segments_crops = [seg_box_from_ts_box(box) for box in time_series_crops]
+    segments_crops = [ts_to_seg_box(box) for box in time_series_crops]
 
     # convert segment union indices to segment ids
     segment_unions = [tuple(segment_ids[i] for i in x) for x in segment_unions]
@@ -279,6 +282,8 @@ def distributed_nmf(
         segments_crop,
     ):
 
+        print(f'SEGMENT IDS: {segment_ids}\nTIME_SERIES_CROP: {time_series_crop}', flush=True)
+
         # read segments and time series
         time_series = time_series_zarr[(slice(None),) + time_series_crop]
         ts = time_series.shape
@@ -300,12 +305,19 @@ def distributed_nmf(
         if labels[0] == 0: labels = labels[1:]
         n_labels = len(labels)
 
-        pf = int(np.round(sampling_ratio[0]))  # projection factor
+        pf = int(np.round(sampling_ratio[0]))  # projection_factor
         S = np.empty((np.prod(ts[1:]), n_labels), dtype=np.float32)
+        includes_first_plane = (time_series_crop[0].start == 0)  # edge cases
+        includes_last_plane = (time_series_crop[0].stop == time_series_zarr.shape[1]-1)
         for i, n_i in enumerate(labels):
             comp = np.zeros(ts[1:], dtype=S.dtype)
             for j in range(comp.shape[0]):
-                comp[j] = np.max(segments[j*pf:(j+1)*pf] == n_i, axis=0)
+                seg_crop = slice(j*pf, (j+1)*pf)
+                if includes_first_plane and j == 0:
+                    seg_crop = slice(0, pf//2 + 1)
+                elif includes_last_plane and j == comp.shape[0]-1:
+                    seg_crop = slice(-(pf//2 +1), None)
+                comp[j] = np.max(segments[seg_crop] == n_i, axis=0)
             S[:, i] = comp.reshape(np.prod(ts[1:]))
 
         # format search neighborhoods
@@ -343,7 +355,7 @@ def distributed_nmf(
             # ensure correct dtype then save
             given_dtype = time_series_zarr.dtype
             if reconstruction.dtype != given_dtype:
-                if give_dtype == int or np.issubdtype(given_dtype, np.integer):
+                if given_dtype == int or np.issubdtype(given_dtype, np.integer):
                     reconstruction = np.round(reconstruction)
                 reconstruction = reconstruction.astype(given_dtype)
             np.save(temp_dir_path + '/chunk_' + crop_string + '.npy', reconstruction)
@@ -420,6 +432,6 @@ def distributed_nmf(
     all_time_components.fill(np.nan)
     for segment_union, components in zip(segment_unions, segment_time_components):
         for segment_id, component in zip(segment_union, components):
-            all_time_components[segment_id, :] = component
+            all_time_components[segment_id-1, :] = component
     return all_time_components
 
