@@ -8,6 +8,11 @@ initial segmentation are run in parallel on distributed hardware.
 
 ## Example results - crops from a whole brain dataset
 ---
+Upper left: raw data
+Upper right: mean of raw data over time
+Lower left: NMF reconstruction (space\_components @ time\_components)
+Lower right: residual (raw - reconstruction)
+
 ![crop0](resources/crop0.gif)
 ![crop1](resources/crop1.gif)
 
