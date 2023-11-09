@@ -301,23 +301,38 @@ def distributed_nmf(
             V = np.maximum(0, V - time_series_baseline)
 
         # format the spatial components
+        #    get all labels
         labels = np.unique(segments)
         if labels[0] == 0: labels = labels[1:]
         n_labels = len(labels)
 
+        #    determine relationship between segments and time series planes
         pf = int(np.round(sampling_ratio[0]))  # projection_factor
+        weights = np.abs(np.arange(-(pf//2), pf//2+1)) * segments_spacing[0]
+        weights = np.exp(-weights / neighborhood_sigma)
+        plane_weights = np.empty((pf,) + segments.shape[1:], dtype=np.float32)
+        plane_weights[...] = weights.reshape((pf,) + (1,) * (segments.ndim - 1))
+
+        #    make a component for each label
         S = np.empty((np.prod(ts[1:]), n_labels), dtype=np.float32)
         includes_first_plane = (time_series_crop[0].start == 0)  # edge cases
-        includes_last_plane = (time_series_crop[0].stop == time_series_zarr.shape[1]-1)
+        includes_last_plane = (time_series_crop[0].stop >= time_series_zarr.shape[1]-1)
         for i, n_i in enumerate(labels):
+            start = 0
             comp = np.zeros(ts[1:], dtype=S.dtype)
             for j in range(comp.shape[0]):
-                seg_crop = slice(j*pf, (j+1)*pf)
+                seg_crop = slice(start, start + pf)
+                w_crop = slice(None)
                 if includes_first_plane and j == 0:
                     seg_crop = slice(0, pf//2 + 1)
+                    w_crop = slice(0, pf//2 + 1)
                 elif includes_last_plane and j == comp.shape[0]-1:
-                    seg_crop = slice(-(pf//2 +1), None)
-                comp[j] = np.max(segments[seg_crop] == n_i, axis=0)
+                    seg_crop = slice(-(pf//2 + 1), None)
+                    w_crop = slice(-(pf//2 + 1), None)
+                weighted_segment = (segments[seg_crop] == n_i) * plane_weights[w_crop]
+                comp[j] = np.sum(weighted_segment, axis=0)
+                comp[j] = np.minimum(1, comp[j])
+                start = seg_crop.stop
             S[:, i] = comp.reshape(np.prod(ts[1:]))
 
         # format search neighborhoods
