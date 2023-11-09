@@ -198,7 +198,9 @@ def nmf(V, S_init, H_init, B, H_true=None, num_iterations=100, update_int=10, H_
 
         # Update H matrix with dynamically estimated step size
         H_gradient = S.T @ (V - S @ H)
-        H_step_size = H_lr / np.sum(S * S, axis=0)[:, None]
+        norm = np.sum(S, axis=0)[:, None]
+        norm[norm == 0] = 1
+        H_step_size = H_lr / norm
         H_gradient *= H_step_size
         H += H_gradient
         H = np.maximum(0, H)
@@ -206,11 +208,13 @@ def nmf(V, S_init, H_init, B, H_true=None, num_iterations=100, update_int=10, H_
         # Update S matrix with spatial constraint
         # All values outside of neighborhood B are set to 1e-12 for stability
         S_gradient = (V - S[:, :n_components] @ H[:n_components]) @ H[:n_components].T
-        S_step_size = S_lr / np.sum(H[:n_components] * H[:n_components], axis=1)[None, :]
+        norm = np.sum(H[:n_components], axis=1)[None, :]
+        norm[norm == 0] = 1
+        S_step_size = S_lr / norm
         S_gradient *= S_step_size * B
         S[:, :n_components] += S_gradient
         S = np.maximum(0, S)
-        S /= np.max(S, axis=0, keepdims=True)  # we want amplitude in temporal not spatial components
+        S = np.minimum(1, S)  # we want amplitude in temporal not spatial components
 
         # Save gradient steps
         S_gradients.append(np.mean(S_gradient))
