@@ -206,7 +206,6 @@ def nmf(V, S_init, H_init, B, H_true=None, num_iterations=100, update_int=10, H_
         H = np.maximum(0, H)
 
         # Update S matrix with spatial constraint
-        # All values outside of neighborhood B are set to 1e-12 for stability
         S_gradient = (V - S[:, :n_components] @ H[:n_components]) @ H[:n_components].T
         norm = np.sum(H[:n_components], axis=1)[None, :]
         norm[norm == 0] = 1
@@ -324,25 +323,22 @@ def nmf_pytorch(V, S_init, H_init, B, H_true=None, num_iterations=100, update_in
 
         # Update H matrix with dynamically estimated step size
         H_gradient = S.T @ (V - S @ H)
-        H_step_size = H_lr / torch.sum(S * S, axis=0)[:, None]
-        # H_lr = line_search_step_size(V, S, H, H_gradient, gradient_str='H',
-        #                                     objective_function=frobenius_norm_pytorch,
-        #                                     lr=H_step_size, alpha=1, beta=0.9)
+        norm = torch.sum(S, dim=0)[:, None]
+        norm[norm == 0] = 1
+        H_step_size = H_lr / norm
         H_gradient *= H_step_size
-        H.add_(H_gradient)
-        H = torch.relu(H)
+        H += H_gradient
+        H = torch.maximum(H, torch.Tensor([0]).to(H.device))
 
         # Update S matrix with spatial constraint
-        # All values outside of neighborhood B are set to 1e-12 for stability
-        S_gradient = (V - S @ H) @ H.T
-        S_step_size = S_lr / torch.sum(H * H, axis=1)[None, :]
-        # S_lr = line_search_step_size(V, S, H, S_gradient, gradient_str='S',
-        #                              objective_function=frobenius_norm_pytorch,
-        #                              lr=S_step_size, alpha=1.01, beta=0.1)
+        S_gradient = (V - S[:, :n_components] @ H[:n_components]) @ H[:n_components].T
+        norm = torch.sum(H[:n_components], dim=1)[None, :]
+        norm[norm == 0] = 1
+        S_step_size = S_lr / norm
         S_gradient *= S_step_size * B
-        S.add_(S_gradient)
-        S = torch.relu(S)
-        S = S / torch.max(S, dim=0, keepdim=True).values
+        S[:, :n_components] += S_gradient
+        S = torch.maximum(S, torch.Tensor([0]).to(S.device))
+        S = torch.minimum(S, torch.Tensor([1]).to(S.device))  # we want amplitude in temporal not spatial components
 
         # Save gradient steps
         S_gradients.append(torch.mean(S_gradient).item())
