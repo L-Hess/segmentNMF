@@ -138,6 +138,8 @@ def neighborhood_by_distance(S, segments_shape, spacing, max_dist, subsample=Non
         ndarray: The expanded segmentation labels.
 
     """
+
+    # Initialize neighborhood with binarized S array
     B = S > 0
 
     if subsample is not None:
@@ -153,5 +155,9 @@ def neighborhood_by_distance(S, segments_shape, spacing, max_dist, subsample=Non
         if subsample is not None:
             Bi = Bi[::subsample[0], ::subsample[1], ::subsample[2]]
         B_res[:, c_i] = Bi.reshape(B_res[:, c_i].shape)
+
+    # For each component i, rescale Bi by maximum of Si
+    B_res *= np.max(S, axis=0, keepdims=True)
+
     return B_res
 
