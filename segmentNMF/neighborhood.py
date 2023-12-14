@@ -105,6 +105,8 @@ def neighborhood_by_weights(S, segments_shape, spacing, sigma, subsample=None):
         ndarray: The components spatial weights
 
     """
+
+    # Initialize neighborhood with binarized S array
     B = (S > 0).astype(np.float32)
 
     if subsample is not None:
@@ -120,6 +122,10 @@ def neighborhood_by_weights(S, segments_shape, spacing, sigma, subsample=None):
         if subsample is not None:
             Bi = Bi[::subsample[0], ::subsample[1], ::subsample[2]]
         B_res[:, c_i] = Bi.reshape(B_res[:, c_i].shape)
+
+    # For each component i, rescale Bi by maximum of Si
+    B_res = B_res * np.max(S, axis=0, keepdims=True)
+
     return B_res
 
 
@@ -157,7 +163,7 @@ def neighborhood_by_distance(S, segments_shape, spacing, max_dist, subsample=Non
         B_res[:, c_i] = Bi.reshape(B_res[:, c_i].shape)
 
     # For each component i, rescale Bi by maximum of Si
-    B_res *= np.max(S, axis=0, keepdims=True)
+    B_res = B_res * np.max(S, axis=0, keepdims=True)
 
     return B_res
 
