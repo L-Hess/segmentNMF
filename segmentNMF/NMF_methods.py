@@ -331,12 +331,12 @@ def nmf_pytorch(V, S_init, H_init, B, H_true=None, num_iterations=100, update_in
         H = torch.maximum(H, torch.Tensor([0]).to(H.device))
 
         # Update S matrix with spatial constraint
-        S_gradient = (V - S[:, :n_components] @ H[:n_components]) @ H[:n_components].T
-        norm = torch.sum(H[:n_components], dim=1)[None, :]
+        S_gradient = (V - S @ H) @ H.T
+        norm = torch.sum(H, dim=1)[None, :]
         norm[norm == 0] = 1
         S_step_size = S_lr / norm
         S_gradient *= S_step_size * B
-        S[:, :n_components] += S_gradient
+        S += S_gradient
         S = torch.maximum(S, torch.Tensor([0]).to(S.device))
         S = torch.minimum(S, torch.Tensor([1]).to(S.device))  # we want amplitude in temporal not spatial components
 
