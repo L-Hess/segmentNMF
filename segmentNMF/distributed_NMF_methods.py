@@ -315,20 +315,15 @@ def distributed_nmf(
 
         #    make a component for each label
         S = np.empty((np.prod(ts[1:]), n_labels), dtype=np.float32)
-        includes_first_plane = (time_series_crop[0].start == 0)  # edge cases
-        includes_last_plane = (time_series_crop[0].stop >= time_series_zarr.shape[1]-1)
         for i, n_i in enumerate(labels):
-            start = 0
+            start = -pf//2
             comp = np.zeros(ts[1:], dtype=S.dtype)
             for j in range(comp.shape[0]):
                 seg_crop = slice(start, start + pf)
                 w_crop = slice(None)
-                if includes_first_plane and j == 0:
+                if j == 0:
                     seg_crop = slice(0, pf//2 + 1)
-                    w_crop = slice(0, pf//2 + 1)
-                elif includes_last_plane and j == comp.shape[0]-1:
-                    seg_crop = slice(-(pf//2 + 1), None)
-                    w_crop = slice(-(pf//2 + 1), None)
+                    w_crop = slice(pf//2, None)
                 weighted_segment = (segments[seg_crop] == n_i) * plane_weights[w_crop]
                 comp[j] = np.sum(weighted_segment, axis=0)
                 comp[j] = np.minimum(1, comp[j])
