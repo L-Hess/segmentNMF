@@ -3,11 +3,13 @@
 A non-negative matrix factorization algorithm for demixing calcium imaging data.
 The user can specify initial values for the structural and temporal components;
 in particular structural components can be initialized with an anatomical segmentation.
+Spatial component learning can be regularized to stay as close as you like to the prior initialization.
 Distributed functions are available for large datasets, small crops defined by the
 initial segmentation are run in parallel on distributed hardware.
 
 ## Example results - crops from a whole brain dataset
 ---
+Four example panels, for each panel:
 Upper left: raw data\
 Upper right: mean of raw data over time\
 Lower left: NMF reconstruction (space\_components @ time\_components)\
