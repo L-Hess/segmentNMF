@@ -84,9 +84,9 @@ def distance_transform_edt_binary(arr, spacing):
     """
     # Calculate the distance transform of the binary array
     arr = arr * -1 + 1
-    dist_transform = distance_transform_edt(arr, spacing)
+    dist_transform, closest_inds = distance_transform_edt(arr, spacing, return_indices=True)
 
-    return dist_transform
+    return dist_transform, closest_inds
 
 
 def neighborhood_by_weights(S, segments_shape, spacing, sigma, subsample=None):
@@ -105,22 +105,38 @@ def neighborhood_by_weights(S, segments_shape, spacing, sigma, subsample=None):
         ndarray: The components spatial weights
 
     """
-    B = (S > 0).astype(np.float32)
 
-    if subsample is not None:
-        B_res = B.reshape(*segments_shape, B.shape[1])
-        B_res = B_res[::subsample[0], ::subsample[1], ::subsample[2]]
-        B_res = B_res.reshape(np.prod(B_res.shape[:-1]), B.shape[-1])
-    else:
-        B_res = B
+    # initialize empty neighborhood matrix
+    B = np.zeros_like(S)
 
-    for c_i in range(B.shape[1]):
-        dists = distance_transform_edt_binary(B[:, c_i].reshape(segments_shape), spacing)
-        Bi = np.exp( -dists / sigma )
+    # run over components
+    for c_i in range(S.shape[1]):
+
+        # get spatial component and initialize empty neighborhood
+        Si = S[:, c_i].reshape(segments_shape)
+        Bi = np.zeros_like(Si)
+
+        # Find unique spatial component values, discard 0 (background) if present
+        Si_unique = np.unique(Si)
+        if Si_unique[0] == 0: Si_unique = Si_unique[1:]
+
+        # run over unique spatial component entries and assign neighborhood values based on spatial falloff
+        # this is done sequentially to make sure the largest weight value per index is assigned
+        for v in Si_unique:
+            dists_h, inds = distance_transform_edt_binary(Si == v, spacing)  # Within-plane (horizontal) distance
+            dist_v = -np.log(v) * sigma  # Across planes (vertical) distance - Assuming same weighting calculation
+            dists_tot = np.sqrt(dists_h**2 + dist_v**2)  # hypotenuse distance
+
+            Bv_wts = np.exp(-dists_tot / sigma)
+            Bi = np.maximum(Bv_wts**2, Bi)
+
+        # Subsample B if applicable
         if subsample is not None:
             Bi = Bi[::subsample[0], ::subsample[1], ::subsample[2]]
-        B_res[:, c_i] = Bi.reshape(B_res[:, c_i].shape)
-    return B_res
+
+        B[:, c_i] = Bi.reshape(S[:, c_i].shape)
+
+    return B
 
 
 def neighborhood_by_distance(S, segments_shape, spacing, max_dist, subsample=None):
@@ -138,6 +154,8 @@ def neighborhood_by_distance(S, segments_shape, spacing, max_dist, subsample=Non
         ndarray: The expanded segmentation labels.
 
     """
+
+    # Initialize neighborhood with binarized S array
     B = S > 0
 
     if subsample is not None:
@@ -148,10 +166,14 @@ def neighborhood_by_distance(S, segments_shape, spacing, max_dist, subsample=Non
         B_res = B
 
     for c_i in range(B.shape[1]):
-        dists = distance_transform_edt_binary(B[:, c_i].reshape(segments_shape), spacing)
+        dists, _ = distance_transform_edt_binary(B[:, c_i].reshape(segments_shape), spacing)
         Bi = (dists < max_dist)
         if subsample is not None:
             Bi = Bi[::subsample[0], ::subsample[1], ::subsample[2]]
         B_res[:, c_i] = Bi.reshape(B_res[:, c_i].shape)
+
+    # For each component i, rescale Bi by maximum of Si
+    B_res = B_res * np.max(S, axis=0, keepdims=True)
+
     return B_res
 
