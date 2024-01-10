@@ -202,8 +202,8 @@ def distributed_nmf(
     # compute time series crops
     sampling_ratio = segments_spacing / time_series_spacing
     def seg_to_ts_box(box):
-        start = [int(np.round(x.start*r)) for x, r in zip(box, sampling_ratio)]
-        stop = [int(np.round((x.stop-1)*r))+1 for x, r in zip(box, sampling_ratio)]
+        start = [int(np.floor(x.start*r)) for x, r in zip(box, sampling_ratio)]
+        stop = [int(np.ceil((x.stop-1)*r))+1 for x, r in zip(box, sampling_ratio)]
         return tuple(slice(x, y) for x, y in zip(start, stop))
     time_series_crops = [seg_to_ts_box(box) for box in box_unions]
 
@@ -314,6 +314,8 @@ def distributed_nmf(
         plane_weights[...] = weights.reshape((pf,) + (1,) * (segments.ndim - 1))
 
         #    make a component for each label
+        #    note: segments crop already contains radius to account for projections
+        #          i.e. segments crop is a little bigger than time series crop
         S = np.empty((np.prod(ts[1:]), n_labels), dtype=np.float32)
         includes_first_plane = (time_series_crop[0].start == 0)  # edge cases
         includes_last_plane = (time_series_crop[0].stop >= time_series_zarr.shape[1]-1)
@@ -325,13 +327,12 @@ def distributed_nmf(
                 w_crop = slice(None)
                 if includes_first_plane and j == 0:
                     seg_crop = slice(0, pf//2 + 1)
-                    w_crop = slice(0, pf//2 + 1)
+                    w_crop = slice(-(pf//2 + 1), None)
                 elif includes_last_plane and j == comp.shape[0]-1:
                     seg_crop = slice(-(pf//2 + 1), None)
-                    w_crop = slice(-(pf//2 + 1), None)
+                    w_crop = slice(0, pf//2 + 1)
                 weighted_segment = (segments[seg_crop] == n_i) * plane_weights[w_crop]
-                comp[j] = np.sum(weighted_segment, axis=0)
-                comp[j] = np.minimum(1, comp[j])
+                comp[j] = np.max(weighted_segment, axis=0)
                 start = seg_crop.stop
             S[:, i] = comp.reshape(np.prod(ts[1:]))
 
