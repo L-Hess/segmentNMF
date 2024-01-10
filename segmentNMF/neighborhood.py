@@ -123,9 +123,12 @@ def neighborhood_by_weights(S, segments_shape, spacing, sigma, subsample=None):
         # run over unique spatial component entries and assign neighborhood values based on spatial falloff
         # this is done sequentially to make sure the largest weight value per index is assigned
         for v in Si_unique:
-            dists, inds = distance_transform_edt_binary(Si == v, spacing)
-            Bv_wts = np.exp(-dists / sigma)
-            Bi = np.maximum(Bv_wts * v, Bi)
+            dists_h, inds = distance_transform_edt_binary(Si == v, spacing)  # Within-plane (horizontal) distance
+            dist_v = -np.log(v) * sigma  # Across planes (vertical) distance - Assuming same weighting calculation
+            dists_tot = np.sqrt(dists_h**2 + dist_v**2)  # hypotenuse distance
+
+            Bv_wts = np.exp(-dists_tot / sigma)
+            Bi = np.maximum(Bv_wts**2, Bi)
 
         # Subsample B if applicable
         if subsample is not None:
