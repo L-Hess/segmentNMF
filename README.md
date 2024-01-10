@@ -9,7 +9,7 @@ initial segmentation are run in parallel on distributed hardware.
 
 ## Example results - crops from a whole brain dataset
 ---
-Four example panels, for each panel:
+Four example panels; for each panel:\
 Upper left: raw data\
 Upper right: mean of raw data over time\
 Lower left: NMF reconstruction (space\_components @ time\_components)\
