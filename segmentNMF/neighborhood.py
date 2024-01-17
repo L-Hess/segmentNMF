@@ -128,7 +128,7 @@ def neighborhood_by_weights(S, segments_shape, spacing, sigma, subsample=None):
             dists_tot = np.sqrt(dists_h**2 + dist_v**2)  # hypotenuse distance
 
             Bv_wts = np.exp(-dists_tot / sigma)
-            Bi = np.maximum(Bv_wts**2, Bi)
+            Bi = np.maximum(Bv_wts, Bi)
 
         # Subsample B if applicable
         if subsample is not None:

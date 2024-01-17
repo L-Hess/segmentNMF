@@ -318,7 +318,7 @@ def distributed_nmf(
         #          i.e. segments crop is a little bigger than time series crop
         S = np.empty((np.prod(ts[1:]), n_labels), dtype=np.float32)
         includes_first_plane = (time_series_crop[0].start == 0)
-        includes_last_plane = (time_series_crop[0].start >= 0)
+        includes_last_plane = (time_series_crop[0].stop > time_series_zarr.shape[1] - 1)
         for i, n_i in enumerate(labels):
             start = 0
             comp = np.zeros(ts[1:], dtype=S.dtype)
