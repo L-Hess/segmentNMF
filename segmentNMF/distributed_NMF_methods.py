@@ -252,7 +252,7 @@ def distributed_nmf(
             reconstruction_path, 'w',
             shape=time_series_zarr.shape,
             chunks=time_series_zarr.chunks,
-            dtype=np.float32,
+            dtype=time_series_zarr.dtype,
             synchronizer=zarr.ThreadSynchronizer(),
         )
 
@@ -419,7 +419,7 @@ def distributed_nmf(
                 block_flags = np.ones(reconstruction_zarr.cdata_shape[1:], dtype=bool)
                 for iii, crop in enumerate(time_series_crops):
                     if written[iii]: continue
-                    f = lambda x, y: slice(x.start//y, (x.stop//y)+1)
+                    f = lambda x, y: slice(x.start//y, (x.stop-1)//y+1)
                     blocks_touched = tuple(f(x, y) for x, y in zip(crop, block_shape))
                     if np.all(block_flags[blocks_touched]):
                         write_batch.append(crop)
