@@ -252,7 +252,7 @@ def distributed_nmf(
             reconstruction_path, 'w',
             shape=time_series_zarr.shape,
             chunks=time_series_zarr.chunks,
-            dtype=time_series_zarr.dtype,
+            dtype=np.float32,
             synchronizer=zarr.ThreadSynchronizer(),
         )
 
@@ -362,18 +362,11 @@ def distributed_nmf(
         # write reconstruction
         if reconstruction_path is not None:
 
-            # construct weighted reconstruction
+            # construct weighted reconstruction and save to temp location
             reconstruction = (S_res @ H_res).T.reshape(ts)
             reconstruction_weights = reconstruction_weights_zarr[time_series_crop]
             reconstruction *= reconstruction_weights[None, ...]
             crop_string = '_'.join([f'{x.start}x{x.stop}' for x in time_series_crop])
-
-            # ensure correct dtype then save
-            given_dtype = time_series_zarr.dtype
-            if reconstruction.dtype != given_dtype:
-                if given_dtype == int or np.issubdtype(given_dtype, np.integer):
-                    reconstruction = np.round(reconstruction)
-                reconstruction = reconstruction.astype(given_dtype)
             np.save(temp_dir_path + '/chunk_' + crop_string + '.npy', reconstruction)
 
         # time series for the complete cells are what we really need
