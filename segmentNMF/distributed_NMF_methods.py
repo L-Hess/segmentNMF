@@ -231,8 +231,6 @@ def distributed_nmf(
         temp_dir_path = temporary_directory.name
 
     # ensure segments are a zarr array
-    # tried segmentNMF.file_handling.create_temp_zarr but dask was not
-    # able to serialize/deserialize that zarr array for some reason
     segments_zarr = segments
     if not isinstance(segments_zarr, zarr.Array):
         zarr_chunks = (128,) * segments.ndim
@@ -362,12 +360,16 @@ def distributed_nmf(
         # write reconstruction
         if reconstruction_path is not None:
 
-            # construct weighted reconstruction and save to temp location
-            reconstruction = (S_res @ H_res).T.reshape(ts)
-            reconstruction_weights = reconstruction_weights_zarr[time_series_crop]
-            reconstruction *= reconstruction_weights[None, ...]
+            # save the components to be reconstructed later
+            # XXX implicit bug here, never triggered, time_series_crop is not guaranteed to be
+            #    to be a unique identifier
             crop_string = '_'.join([f'{x.start}x{x.stop}' for x in time_series_crop])
-            np.save(temp_dir_path + '/chunk_' + crop_string + '.npy', reconstruction)
+            data_path = temp_dir_path + '/chunk_' + crop_string + '.npz'
+            np.savez_compressed(
+                data_path,
+                S=S_res.astype(np.float32),
+                H=H_res.astype(np.float32),
+            )
 
         # time series for the complete cells are what we really need
         return H_res[:n_segments]
@@ -377,12 +379,24 @@ def distributed_nmf(
 
         # load crop
         crop_string = '_'.join([f'{x.start}x{x.stop}' for x in crop])
-        data_path = temp_dir_path + '/chunk_' + crop_string + '.npy'
+        data_path = temp_dir_path + '/chunk_' + crop_string + '.npz'
         data = np.load(data_path)
- 
+        S, H = data['S'], data['H']
+        S = S.astype(np.float32)
+        H = H.astype(np.float32)
+        data.close()
+
+        # get time series shape (ts)
+        ts = (H.shape[1],) + tuple(x.stop - x.start for x in crop)
+
+        # create merge weighted reconstruction
+        weights = reconstruction_weights_zarr[crop]
+        reconstruction = (S @ H).T.reshape(ts)
+        reconstruction *= weights[None, ...]
+
         # update the zarr, remove the file
         current = reconstruction_zarr[(slice(None),) + crop]
-        reconstruction_zarr[(slice(None),) + crop] = current + data
+        reconstruction_zarr[(slice(None),) + crop] = current + reconstruction
         os.remove(data_path)
         return True
 
@@ -402,6 +416,17 @@ def distributed_nmf(
         # run reconstruction loop
         if reconstruction_path is not None:
 
+            # modify cluster for reconstruction loop
+            cluster.change_worker_attributes(
+                min_workers=75,
+                max_workers=75,
+                ncpus=2,
+                memory="30GB",
+                mem=int(15e9*2),
+                queue=None,
+                job_extra=[],
+            )
+
             # loop until all blocks are written
             block_shape = reconstruction_zarr.chunks[1:]
             written = np.zeros(len(segment_unions), dtype=bool)
@@ -412,7 +437,7 @@ def distributed_nmf(
                 block_flags = np.ones(reconstruction_zarr.cdata_shape[1:], dtype=bool)
                 for iii, crop in enumerate(time_series_crops):
                     if written[iii]: continue
-                    f = lambda x, y: slice(x.start//y, (x.stop//y)+1)
+                    f = lambda x, y: slice(x.start//y, (x.stop-1)//y+1)
                     blocks_touched = tuple(f(x, y) for x, y in zip(crop, block_shape))
                     if np.all(block_flags[blocks_touched]):
                         write_batch.append(crop)
