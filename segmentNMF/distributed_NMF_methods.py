@@ -9,6 +9,9 @@ from scipy.spatial import cKDTree
 from segmentNMF.neighborhood import neighborhood_by_weights
 from segmentNMF.NMF_methods import nmf, nmf_pytorch
 
+import os
+os.environ['TENSORSTORE_CA_BUNDLE'] = '/etc/pki/tls/certs/ca-bundle.crt'
+
 
 def distributed_nmf(
     time_series_zarr,
@@ -24,6 +27,7 @@ def distributed_nmf(
     use_gpu=False,
     n_output_segments=None,
     reconstruction_path=None,
+    save_segments=False,
     cluster=None,
     cluster_kwargs={},
     **kwargs,
@@ -186,6 +190,7 @@ def distributed_nmf(
         segments_assigned[neighbor_ids] = True
         neighbor_dists[neighbor_ids] = np.inf
         neighbor_dists[np.isin(neighbors, neighbor_ids)] = np.inf
+        print(f"Number of segments assigned: {np.sum(segments_assigned)}/{len(segments_assigned)}", end='\r')
 
     # compute box unions, expand by radius
     print('COMPUTING ALL CROPS')
@@ -199,11 +204,15 @@ def distributed_nmf(
         return tuple(slice(x, y) for x, y in zip(start, stop))
     box_unions = [unify_and_expand(x) for x in segment_unions]
 
+    box_sizes = [np.prod([sl.stop - sl.start for sl in box]) for box in box_unions]
+    box_unions = np.array(box_unions)[np.flip(np.argsort(box_sizes))]
+
     # compute time series crops
     sampling_ratio = segments_spacing / time_series_spacing
     def seg_to_ts_box(box):
         start = [int(np.floor(x.start*r)) for x, r in zip(box, sampling_ratio)]
-        stop = [int(np.ceil((x.stop-1)*r))+1 for x, r in zip(box, sampling_ratio)]
+        stop = [np.minimum(int(np.ceil((x.stop-1)*r))+1, m) for x, r, m in zip(box, sampling_ratio,
+                                                                               time_series_zarr.shape[1:])]
         return tuple(slice(x, y) for x, y in zip(start, stop))
     time_series_crops = [seg_to_ts_box(box) for box in box_unions]
 
@@ -213,10 +222,13 @@ def distributed_nmf(
     def ts_to_seg_box(box):
         start = [int(np.round(x.start*r)) for x, r in zip(box, sampling_ratio)]
         stop = [int(np.round((x.stop-1)*r))+1 for x, r in zip(box, sampling_ratio)]
+        stop[0] += int(sampling_ratio[0])
         start = [max(0, x-r) for x, r in zip(start, radius)]
         stop = [min(s, x+r) for x, r, s in zip(stop, radius, segments.shape)]
         return tuple(slice(x, y) for x, y in zip(start, stop))
     segments_crops = [ts_to_seg_box(box) for box in time_series_crops]
+
+    print(len(time_series_crops), len(segments_crops))
 
     # convert segment union indices to segment ids
     segment_unions = [tuple(segment_ids[i] for i in x) for x in segment_unions]
@@ -224,13 +236,19 @@ def distributed_nmf(
     # make tempfile if we need it
     A = not isinstance(segments, zarr.Array)
     B = reconstruction_path is not None
-    if A or B:
-        temporary_directory = tempfile.TemporaryDirectory(
-            prefix='.', dir=temporary_directory or os.getcwd(),
-        )
-        temp_dir_path = temporary_directory.name
+    C = save_segments
+    if A or B or C:
+        # temporary_directory = tempfile.TemporaryDirectory(
+        #     prefix='/nrs/ahrensraverfish/hesselinkl/NMF_google/', dir=temporary_directory or os.getcwd(),
+        # )
+        # temp_dir_path = temporary_directory.name
+        # temp_dir_path = '/nrs/ahrensraverfish/hesselinkl/NMF_google/' + temporary_directory
+        # temp_dir_path = '/nrs/ahrensraverfish/hesselinkl/NMF_google/dff/tempfiles/'
+        temp_dir_path = temporary_directory
 
     # ensure segments are a zarr array
+    # tried segmentNMF.file_handling.create_temp_zarr but dask was not
+    # able to serialize/deserialize that zarr array for some reason
     segments_zarr = segments
     if not isinstance(segments_zarr, zarr.Array):
         zarr_chunks = (128,) * segments.ndim
@@ -249,7 +267,8 @@ def distributed_nmf(
         reconstruction_zarr = zarr.open(
             reconstruction_path, 'w',
             shape=time_series_zarr.shape,
-            chunks=time_series_zarr.chunks,
+            # chunks=time_series_zarr.chunks,
+            chunks=(7879, 1, 64, 64),
             dtype=np.float32,
             synchronizer=zarr.ThreadSynchronizer(),
         )
@@ -266,7 +285,8 @@ def distributed_nmf(
         reconstruction_weights_zarr = zarr.open(
             rw_path, 'w',
             shape=reconstruction_weights.shape,
-            chunks=time_series_zarr.chunks[1:],
+            # chunks=time_series_zarr.chunks[1:],
+            chunks=(1, 64, 64),
             dtype=reconstruction_weights.dtype,
             synchronizer=zarr.ThreadSynchronizer(),
         )
@@ -283,7 +303,13 @@ def distributed_nmf(
         print(f'SEGMENT IDS: {segment_ids}\nTIME_SERIES_CROP: {time_series_crop}', flush=True)
 
         # read segments and time series
-        time_series = time_series_zarr[(slice(None),) + time_series_crop]
+        t0 = time.time()
+        import tensorstore as ts
+        if type(time_series_zarr ) == ts.TensorStore:
+            time_series = time_series_zarr[(slice(0, None),) + time_series_crop].read().result()
+        else:
+            time_series = time_series_zarr[(slice(None),) + time_series_crop]
+        print(time.time() - t0, flush=True)
         ts = time_series.shape
         segments = segments_zarr[segments_crop]
 
@@ -306,10 +332,11 @@ def distributed_nmf(
 
         #    determine relationship between segments and time series planes
         pf = int(np.round(sampling_ratio[0]))  # projection_factor
+        pf_wts = pf//2*2+1  # Make sure projection factor it is always uneven for z-plane centering
         weights = np.abs(np.arange(-(pf//2), pf//2+1)) * segments_spacing[0]
         weights = np.exp(-weights / neighborhood_sigma)
-        plane_weights = np.empty((pf,) + segments.shape[1:], dtype=np.float32)
-        plane_weights[...] = weights.reshape((pf,) + (1,) * (segments.ndim - 1))
+        plane_weights = np.empty((pf_wts,) + segments.shape[1:], dtype=np.float32)
+        plane_weights[...] = weights.reshape((pf_wts,) + (1,) * (segments.ndim - 1))
 
         #    make a component for each label
         #    note: segments crop already contains radius to account for projections
@@ -321,7 +348,7 @@ def distributed_nmf(
             start = 0
             comp = np.zeros(ts[1:], dtype=S.dtype)
             for j in range(comp.shape[0]):
-                seg_crop = slice(start, start + pf)
+                seg_crop = slice(start, start + pf_wts)
                 w_crop = slice(None)
                 if includes_first_plane and j == 0:
                     seg_crop = slice(0, pf//2 + 1)
@@ -331,7 +358,7 @@ def distributed_nmf(
                     w_crop = slice(0, pf//2 + 1)
                 weighted_segment = (segments[seg_crop] == n_i) * plane_weights[w_crop]
                 comp[j] = np.max(weighted_segment, axis=0)
-                start = seg_crop.stop
+                start += pf
             S[:, i] = comp.reshape(np.prod(ts[1:]))
 
         # format search neighborhoods
@@ -371,6 +398,15 @@ def distributed_nmf(
                 H=H_res.astype(np.float32),
             )
 
+        if save_segments:
+            crop_string = '_'.join([f'{x.start}x{x.stop}' for x in time_series_crop])
+            S_path = temp_dir_path + '/chunk_' + crop_string + '_S.npz'
+            print(S_res[:, :n_segments].reshape(ts[1:] + (np.minimum(n_segments, n_labels),)).shape)
+            np.savez_compressed(S_path,
+                                segment_ids=segment_ids,
+                                S=S_res[:, :n_segments].reshape(ts[1:] + (np.minimum(n_segments, n_labels),)),
+                                H=H_res[:n_segments])
+
         # time series for the complete cells are what we really need
         return H_res[:n_segments]
 
@@ -386,7 +422,9 @@ def distributed_nmf(
         H = H.astype(np.float32)
         data.close()
 
-        # get time series shape (ts)
+        # # get time series shape (ts)
+        # z_shape = int(S.shape[0] / np.prod(tuple(x.stop - x.start for x in crop[1:])))
+        # ts = (H.shape[1], z_shape) + tuple(x.stop - x.start for x in crop[1:])
         ts = (H.shape[1],) + tuple(x.stop - x.start for x in crop)
 
         # create merge weighted reconstruction
@@ -418,7 +456,7 @@ def distributed_nmf(
 
             # modify cluster for reconstruction loop
             cluster.change_worker_attributes(
-                min_workers=75,
+                min_workers=1,
                 max_workers=75,
                 ncpus=2,
                 memory="30GB",
@@ -445,7 +483,8 @@ def distributed_nmf(
                         block_flags[blocks_touched] = False
 
                 # submit write batch
-                print(f'WRITING {len(write_batch)} BLOCKS')
+                print(f'WRITING {len(write_batch)} BLOCKS | {np.sum(~written)} BLOCKS LEFT | '
+                      f'{len(time_series_crops)} BLOCKS TOTAL')
                 futures = cluster.client.map(
                     reconstruct_per_block, write_batch,
                 )
@@ -469,3 +508,81 @@ def distributed_nmf(
             all_time_components[segment_id-1, :] = component
     return all_time_components
 
+
+if __name__ == '__main__':
+    import numpy as np
+    import matplotlib.pyplot as plt
+    import zarr
+
+    ts_zarr = zarr.open('/nrs/ahrensraverfish/hesselinkl/NMF_google/timeseries.zarr', mode='r+')
+    seg_zarr = zarr.open('/nrs/ahrensraverfish/hesselinkl/NMF_google/segments.zarr', mode='r+')
+
+    from scipy.ndimage import find_objects
+
+    # Read segmentation data into memory
+    segments = seg_zarr[:]
+
+    # Currently indices of segments run to 728790
+    # Remap those to actual unique index set of 79732 segments
+    # otherwise we create a significantly larger array for the time components than necessary
+    boxes = [(index, box) for index, box in enumerate(find_objects(segments)) if box is not None]
+    for i, [index, box] in enumerate(boxes):
+        inds = segments[box] == index + 1
+        segments[box][inds] = i + 1
+
+    # User-defined settings
+    neighborhood_sigma = 2.0,
+    max_complete_cells_per_block = 15
+    max_neighbor_distance = 10.0
+    time_series_baseline = 0.
+    num_iterations = 250,
+    min_iterations = 50
+    H_lr = 0.1
+    S_lr = 0.1
+    objective_threshold = 1e-6
+    update_int = 1
+
+    reconstruction_path = '/nrs/ahrens/Luuk/NMF_google/nmf_reconstruction.zarr'
+    temporary_directory = '/nrs/ahrens/Luuk/NMF_google/'
+    dff_path = reconstruction_path = '/nrs/ahrens/Luuk/NMF_google/dff_Hlr_0p1_Slr_0p1_sigma_2p0.npy'
+
+    import numpy as np
+    from segmentNMF.distributed_NMF_methods import distributed_nmf
+
+    cluster_kwargs = {
+        'project': 'ahrens',
+        'ncpus': 2,
+        'threads': 1,
+        'min_workers': 1,
+        'max_workers': 1,
+        'death_timeout': 600,
+        'queue': 'gpu_rtx',
+        'job_extra': ['-gpu "num=1"'],
+        'config': {
+            'distributed.scheduler.worker-saturation': 1.0,
+        }
+    }
+
+    results = distributed_nmf(
+        ts_zarr,
+        segments,
+        time_series_spacing,
+        segments_spacing,
+        neighborhood_sigma=neighborhood_sigma,
+        max_complete_cells_per_block=max_complete_cells_per_block,
+        max_neighbor_distance=max_neighbor_distance,
+        time_series_baseline=time_series_baseline,
+        num_iterations=num_iterations,
+        min_iterations=min_iterations,
+        H_lr=H_lr,
+        S_lr=S_lr,
+        objective_threshold=objective_threshold,
+        update_int=update_int,
+        n_output_segments=segments.max() + 1,
+        reconstruction_path=reconstruction_path,
+        temporary_directory=temporary_directory,
+        cluster_kwargs=cluster_kwargs,
+        use_gpu=True,
+    )
+
+    np.save(dff_path, dff)
