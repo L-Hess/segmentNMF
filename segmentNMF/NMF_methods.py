@@ -270,7 +270,7 @@ def frobenius_norm_pytorch(V, S, H):
 
 
 def nmf_pytorch(V, S_init, H_init, B, H_true=None, num_iterations=100, update_int=10, H_lr: float = 1e-1,
-                S_lr: float = 1e-1, objective_threshold: float = 1e-2, min_iterations: int = 50):
+                S_lr: float = 1e-1, lr_decay_alpha = 1., objective_threshold: float = 1e-2, min_iterations: int = 50):
 
     """Compute NMF using gradient descent
 
@@ -344,6 +344,10 @@ def nmf_pytorch(V, S_init, H_init, B, H_true=None, num_iterations=100, update_in
         S_gradients.append(torch.mean(S_gradient).item())
         H_gradients.append(torch.mean(H_gradient).item())
 
+        # Apply learning rate reduction
+        S_lr = S_lr * lr_decay_alpha
+        H_lr = H_lr * lr_decay_alpha
+        
         # Calculate Frobenius norm objective
         objective = frobenius_norm_pytorch(V, S, H)
         objectives.append(objective)
