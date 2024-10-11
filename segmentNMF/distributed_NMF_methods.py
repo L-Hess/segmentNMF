@@ -206,6 +206,7 @@ def distributed_nmf(
 
     box_sizes = [np.prod([sl.stop - sl.start for sl in box]) for box in box_unions]
     box_unions = np.array(box_unions)[np.flip(np.argsort(box_sizes))]
+    segment_unions = np.array(segment_unions, dtype=object)[np.flip(np.argsort(box_sizes))]
 
     # compute time series crops
     sampling_ratio = segments_spacing / time_series_spacing
@@ -227,8 +228,6 @@ def distributed_nmf(
         stop = [min(s, x+r) for x, r, s in zip(stop, radius, segments.shape)]
         return tuple(slice(x, y) for x, y in zip(start, stop))
     segments_crops = [ts_to_seg_box(box) for box in time_series_crops]
-
-    print(len(time_series_crops), len(segments_crops))
 
     # convert segment union indices to segment ids
     segment_unions = [tuple(segment_ids[i] for i in x) for x in segment_unions]
@@ -404,6 +403,7 @@ def distributed_nmf(
             print(S_res[:, :n_segments].reshape(ts[1:] + (np.minimum(n_segments, n_labels),)).shape)
             np.savez_compressed(S_path,
                                 segment_ids=segment_ids,
+                                crop=time_series_crop,
                                 S=S_res[:, :n_segments].reshape(ts[1:] + (np.minimum(n_segments, n_labels),)),
                                 H=H_res[:n_segments])
 
