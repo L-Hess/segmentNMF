@@ -22,6 +22,7 @@ def distributed_nmf(
     max_neighbor_distance=20.0,
     block_radius=4.0,
     time_series_baseline=None,
+    time_series_norm=None,
     neighborhood_sigma=2.0,
     temporary_directory=None,
     use_gpu=False,
@@ -322,6 +323,9 @@ def distributed_nmf(
         V = time_series.astype(np.float32).reshape((ts[0], np.prod(ts[1:]))).T
         if time_series_baseline is not None:
             V = np.maximum(0, V - time_series_baseline)
+
+        if time_series_norm is not None:
+            V /= time_series_norm
 
         # format the spatial components
         #    get all labels
